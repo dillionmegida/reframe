@@ -13,6 +13,7 @@ export default function SourcePanel() {
   const videoRef = useRef<HTMLVideoElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [isDragging, setIsDragging] = useState(false)
+  const [isResizing, setIsResizing] = useState(false)
   const [videoRendered, setVideoRendered] = useState({ x: 0, y: 0, w: 0, h: 0 })
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -20,6 +21,7 @@ export default function SourcePanel() {
     () => interpolateAtTime(project.keyframes, currentTime),
     [project.keyframes, currentTime]
   )
+
 
   // Compute video rendered area (object-fit: contain)
   const updateVideoRendered = useCallback(() => {
@@ -210,6 +212,95 @@ export default function SourcePanel() {
   const finalCropX = videoRendered.x + displayX * (videoRendered.w - cropRenderW)
   const finalCropY = videoRendered.y + displayY * (videoRendered.h - cropRenderH)
 
+  // Corner resize handles — scale about center while preserving aspect
+  const handleResizeMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      e.preventDefault()
+
+      setIsResizing(true)
+
+      if (videoRendered.w === 0 || videoRendered.h === 0) return
+
+      const startW = cropRenderW
+      const startH = cropRenderH
+      const centerX = finalCropX + startW / 2
+      const centerY = finalCropY + startH / 2
+
+      const maxW = outputAspect < videoAspect ? videoRendered.h * outputAspect : videoRendered.w
+      const maxH = outputAspect < videoAspect ? videoRendered.h : videoRendered.w / outputAspect
+
+      const minScale = 1
+      const maxScale = 4
+      const minW =
+        outputAspect < videoAspect ? videoRendered.h * outputAspect / maxScale : videoRendered.w / maxScale
+      const minH =
+        outputAspect < videoAspect ? videoRendered.h / maxScale : (videoRendered.w / maxScale) / outputAspect
+
+      const containerRect = containerRef.current?.getBoundingClientRect()
+      if (!containerRect) return
+
+      const onMouseMove = (ev: MouseEvent) => {
+        const pointerX = ev.clientX - containerRect.left
+        const pointerY = ev.clientY - containerRect.top
+
+        let newW = Math.abs(pointerX - centerX) * 2
+        let newH = newW / outputAspect
+
+        // Clamp to fit inside videoRendered bounds
+        if (newW > maxW) {
+          newW = maxW
+          newH = newW / outputAspect
+        }
+        if (newH > maxH) {
+          newH = maxH
+          newW = newH * outputAspect
+        }
+
+        // Clamp scale limits via size
+        if (newW < minW) {
+          newW = minW
+          newH = newW / outputAspect
+        }
+        if (newH < minH) {
+          newH = minH
+          newW = newH * outputAspect
+        }
+
+        // Derive scale from width/height depending on limiting dimension
+        let newScale: number
+        if (outputAspect < videoAspect) {
+          newScale = videoRendered.h / newH
+        } else {
+          newScale = videoRendered.w / newW
+        }
+        newScale = Math.max(minScale, Math.min(maxScale, newScale))
+
+        // Recompute x,y so crop remains centered
+        const newX = (centerX - videoRendered.x - newW / 2) / (videoRendered.w - newW || 1)
+        const newY = (centerY - videoRendered.y - newH / 2) / (videoRendered.h - newH || 1)
+
+        addOrUpdateKeyframe({
+          timestamp: currentTime,
+          x: Math.max(0, Math.min(1, newX)),
+          y: Math.max(0, Math.min(1, newY)),
+          scale: newScale,
+          easing: 'ease-in',
+        })
+      }
+
+      const onMouseUp = () => {
+        setIsResizing(false)
+        document.removeEventListener('mousemove', onMouseMove)
+        document.removeEventListener('mouseup', onMouseUp)
+      }
+
+      document.addEventListener('mousemove', onMouseMove)
+      document.addEventListener('mouseup', onMouseUp)
+    },
+    [cropRenderW, cropRenderH, finalCropX, finalCropY, videoRendered, outputAspect, videoAspect, addOrUpdateKeyframe, currentTime]
+  )
+
   // Scroll to zoom
   const handleWheel = useCallback(
     (e: React.WheelEvent) => {
@@ -261,10 +352,34 @@ export default function SourcePanel() {
           cursor: isDragging ? 'grabbing' : 'grab',
           zIndex: 10,
           pointerEvents: 'auto',
-          transition: (isDragging || isPlaying) ? 'none' : 'left 0.15s ease-out, top 0.15s ease-out, width 0.15s ease-out, height 0.15s ease-out',
+          transition: (isDragging || isPlaying || isResizing) ? 'none' : 'left 0.15s ease-out, top 0.15s ease-out, width 0.15s ease-out, height 0.15s ease-out',
         }}
         onMouseDown={handleMouseDown}
       />
+
+      {/* Corner handles for resize */}
+      {[
+        { key: 'tl', style: { left: finalCropX - 6, top: finalCropY - 6 } },
+        { key: 'tr', style: { left: finalCropX + cropRenderW - 6, top: finalCropY - 6 } },
+        { key: 'bl', style: { left: finalCropX - 6, top: finalCropY + cropRenderH - 6 } },
+        { key: 'br', style: { left: finalCropX + cropRenderW - 6, top: finalCropY + cropRenderH - 6 } },
+      ].map((h) => (
+        <div
+          key={h.key}
+          onMouseDown={handleResizeMouseDown}
+          style={{
+            position: 'absolute',
+            width: 12,
+            height: 12,
+            borderRadius: 2,
+            background: '#f97316',
+            boxShadow: '0 0 4px rgba(0,0,0,0.35)',
+            cursor: `${h.key[0] === 't' ? 'n' : 's'}${h.key[1] === 'l' ? 'w' : 'e'}-resize`,
+            zIndex: 12,
+            ...h.style,
+          }}
+        />
+      ))}
 
       {/* Dim areas outside crop */}
       <div

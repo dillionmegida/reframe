@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useEditorStore } from '../store/editorStore'
 import type { EasingType } from '../types'
+import { EaseLinearIcon, EaseInIcon, EaseOutIcon, EaseInOutIcon } from './icons'
 
 function formatTimestamp(s: number): string {
   const m = Math.floor(s / 60)
@@ -73,74 +74,33 @@ export default function KeyframeInspector({ keyframeId, anchorX }: Props) {
         <span className="font-mono text-xs text-text-primary">{formatTimestamp(kf.timestamp)}</span>
       </div>
 
-      {/* X slider */}
-      <div>
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-[10px] text-text-muted">Left ←→ Right</span>
-          <span className="font-mono text-[10px] text-text-primary">{kf.x.toFixed(2)}</span>
-        </div>
-        <input
-          type="range"
-          min="0"
-          max="1"
-          step="0.01"
-          value={kf.x}
-          onChange={(e) => updateKeyframe(keyframeId, { x: parseFloat(e.target.value) })}
-          className="w-full"
-        />
-      </div>
-
-      {/* Y slider */}
-      <div>
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-[10px] text-text-muted">Top ↕ Bottom</span>
-          <span className="font-mono text-[10px] text-text-primary">{kf.y.toFixed(2)}</span>
-        </div>
-        <input
-          type="range"
-          min="0"
-          max="1"
-          step="0.01"
-          value={kf.y}
-          onChange={(e) => updateKeyframe(keyframeId, { y: parseFloat(e.target.value) })}
-          className="w-full"
-        />
-      </div>
-
-      {/* Scale slider */}
-      <div>
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-[10px] text-text-muted">Scale</span>
-          <span className="font-mono text-[10px] text-accent">{kf.scale.toFixed(2)}×</span>
-        </div>
-        <input
-          type="range"
-          min="1"
-          max="4"
-          step="0.05"
-          value={kf.scale}
-          onChange={(e) => updateKeyframe(keyframeId, { scale: parseFloat(e.target.value) })}
-          className="w-full"
-        />
-      </div>
-
       {/* Easing buttons */}
       <div>
         <span className="text-[10px] text-text-muted uppercase tracking-wider block mb-1">Easing</span>
         <div className="flex gap-1">
-          {easingOptions.map((opt) => (
-            <button
-              key={opt.value}
-              className={`flex-1 text-[10px] py-1 rounded transition-colors ${
-                kf.easing === opt.value
-                  ? 'bg-accent text-black font-medium'
-                  : 'bg-white/5 text-text-muted hover:bg-white/10'
-              }`}
-              onClick={() => updateKeyframe(keyframeId, { easing: opt.value })}
-            >
-              {opt.label}
-            </button>
-          ))}
+          {easingOptions.map((opt) => {
+            const Icon =
+              opt.value === 'linear'
+                ? EaseLinearIcon
+                : opt.value === 'ease-in'
+                ? EaseInIcon
+                : opt.value === 'ease-out'
+                ? EaseOutIcon
+                : EaseInOutIcon
+            const active = kf.easing === opt.value
+            return (
+              <button
+                key={opt.value}
+                className={`flex-1 py-1.5 rounded transition-colors flex items-center justify-center ${
+                  active ? 'bg-accent text-black' : 'bg-white/5 text-text-muted hover:bg-white/10'
+                }`}
+                onClick={() => updateKeyframe(keyframeId, { easing: opt.value })}
+                title={opt.label}
+              >
+                <Icon size={18} />
+              </button>
+            )
+          })}
         </div>
       </div>
 
