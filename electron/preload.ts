@@ -12,6 +12,12 @@ contextBridge.exposeInMainWorld('electron', {
 
   // Export
   exportVideo: (args: any) => ipcRenderer.invoke('export-video', args),
+  // Capture support
+  onCaptureRequest: (cb: (payload: any) => void) => {
+    ipcRenderer.on('capture:request', (_: any, payload: any) => cb(payload))
+  },
+  respondCapture: (channel: string, data: any) => ipcRenderer.send(channel, data),
+  saveTempBlob: (data: Uint8Array, ext: string) => ipcRenderer.invoke('save-temp-blob', data, ext),
   onExportProgress: (cb: (pct: number) => void) => {
     ipcRenderer.on('export:progress', (_: any, pct: number) => cb(pct))
   },

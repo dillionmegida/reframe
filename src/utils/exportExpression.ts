@@ -4,29 +4,20 @@ import { interpolateAtTime } from './interpolate'
 const SAMPLE_INTERVAL = 0.1
 
 interface Sample {
-  t: number       // time relative to trim.start (0-based, matches ffmpeg's in_time)
-  zoom: number    // zoompan zoom level (≥1)
+  t: number       // time relative to trim.start (seconds)
+  frame: number   // frame index relative to trim.start (on)
+  zoom: number    // zoompan zoom level (>=1)
   panX: number    // zoompan x position (pixels in zoomed space)
   panY: number    // zoompan y position (pixels in zoomed space)
 }
 
 /**
- * Build the ffmpeg -vf filter string for export using the zoompan filter.
+ * Build the ffmpeg -vf filter string for export using zoompan.
+ * zoompan keeps output size fixed, allowing per-frame zoom/pan without filter reinit.
  *
- * zoompan outputs a fixed-size frame on every input frame — no filter reinit errors.
- *
- * How zoom/pan map to the preview:
- *   Preview: cropFracH = 1/scale  (portrait-on-landscape case)
- *   zoompan: visible fraction = 1/zoom
- *   → zoom = scale (direct mapping)
- *
- *   Preview: cropX = (srcW - cropW) * x,  cropY = (srcH - cropH) * y
- *   zoompan: the zoomed virtual image is iw*zoom × ih*zoom,
- *            the output window is ow × oh,
- *            pan_x = (iw*zoom - ow) * x,  pan_y = (ih*zoom - oh) * y
- *
- * d=1 means one output frame per input frame (preserve original fps).
- * s=WxH sets fixed output resolution.
+ * Mapping to preview logic:
+ *   preview scale -> zoompan zoom (direct)
+ *   preview pan   -> panX/panY = (iw*zoom - ow) * x/y
  */
 export function buildCropExpression(
   keyframes: Keyframe[],
@@ -44,30 +35,64 @@ export function buildCropExpression(
     ? keyframes
     : [{ id: '', timestamp: trim.start, x: 0.5, y: 0.5, scale: 1.0, easing: 'linear' as const }]
 
-  // Use interpolation at the slice start time (static crop for now)
-  const interp = interpolateAtTime(kfs, trim.start)
+  const duration = Math.max(0, trim.end - trim.start)
 
-  // Match preview crop calculation exactly
+  // Base zoom so that scale=1 matches the preview visible area
   const vidAspect = sourceWidth / sourceHeight
   const outAspect = outW / outH
+  const baseZoom = outAspect < vidAspect
+    ? outH / sourceHeight // height-limited: full height visible at scale=1
+    : outW / sourceWidth  // width-limited: full width visible at scale=1
 
-  let cropFracW: number
-  let cropFracH: number
-  if (outAspect < vidAspect) {
-    cropFracH = 1 / Math.max(interp.scale, 0.0001)
-    cropFracW = (outAspect / vidAspect) * cropFracH
-  } else {
-    cropFracW = 1 / Math.max(interp.scale, 0.0001)
-    cropFracH = (vidAspect / outAspect) * cropFracW
+  // Build sampled timeline
+  const samples: Sample[] = []
+  const stepCount = Math.max(1, Math.ceil(duration / SAMPLE_INTERVAL))
+  for (let i = 0; i <= stepCount; i++) {
+    const tRel = i === stepCount ? duration : i * SAMPLE_INTERVAL
+    const tAbs = trim.start + tRel
+    const interp = interpolateAtTime(kfs, tAbs)
+
+    const frame = Math.round(tRel * fps)
+
+    const zoom = Math.max(1, baseZoom * Math.max(interp.scale, 1))
+    const maxPanX = Math.max(0, sourceWidth * zoom - outW)
+    const maxPanY = Math.max(0, sourceHeight * zoom - outH)
+    const panX = maxPanX * Math.max(0, Math.min(1, interp.x))
+    const panY = maxPanY * Math.max(0, Math.min(1, interp.y))
+
+    samples.push({ t: tRel, frame, zoom, panX, panY })
   }
 
-  cropFracW = Math.min(1, Math.max(0.0001, cropFracW))
-  cropFracH = Math.min(1, Math.max(0.0001, cropFracH))
+  const buildExpr = (getValue: (s: Sample) => number): string => {
+    if (samples.length === 1) return getValue(samples[0]).toFixed(4)
 
-  const cropW = Math.floor((cropFracW * sourceWidth) / 2) * 2
-  const cropH = Math.floor((cropFracH * sourceHeight) / 2) * 2
-  const cropX = Math.floor(((sourceWidth - cropW) * Math.max(0, Math.min(1, interp.x))) / 2) * 2
-  const cropY = Math.floor(((sourceHeight - cropH) * Math.max(0, Math.min(1, interp.y))) / 2) * 2
+    let expr = getValue(samples[samples.length - 1]).toFixed(4)
+    for (let i = samples.length - 2; i >= 0; i--) {
+      const s0 = samples[i]
+      const s1 = samples[i + 1]
+      const v0 = getValue(s0)
+      const v1 = getValue(s1)
+      const segFrames = s1.frame - s0.frame
+      if (segFrames <= 0) continue
 
-  return `crop=${cropW}:${cropH}:${cropX}:${cropY},scale=${outW}:${outH}`
+      let segExpr: string
+      if (Math.abs(v0 - v1) < 0.001) {
+        segExpr = v0.toFixed(4)
+      } else {
+        const slope = (v1 - v0) / segFrames
+        segExpr = `${v0.toFixed(4)}+${slope.toFixed(6)}*(on-${s0.frame})`
+      }
+
+      expr = `if(lte(on,${s1.frame}),${segExpr},${expr})`
+    }
+
+    return expr
+  }
+
+  const zExpr = buildExpr(s => s.zoom)
+  const xExpr = buildExpr(s => s.panX)
+  const yExpr = buildExpr(s => s.panY)
+
+  // setpts to reset timestamps after input-level -ss, then zoompan with fixed size
+  return `setpts=PTS-STARTPTS,zoompan=z='${zExpr}':x='${xExpr}':y='${yExpr}':d=1:s=${outW}x${outH}`
 }

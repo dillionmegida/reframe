@@ -3,6 +3,8 @@ import path from 'path'
 import fs from 'fs'
 import { execFile } from 'child_process'
 import { exportVideo } from './export'
+import { randomUUID } from 'crypto'
+import os from 'os'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -219,3 +221,33 @@ ipcMain.handle('remove-directory', async (_event, dirPath: string) => {
     fs.rmSync(dirPath, { recursive: true, force: true })
   }
 })
+
+// Save blob data to a temp file (renderer can't write to disk)
+ipcMain.handle('save-temp-blob', async (_event, data: Uint8Array, ext: string) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'reframe-cap-'))
+  const filePath = path.join(dir, `${randomUUID()}.${ext.replace(/^\./, '')}`)
+  fs.writeFileSync(filePath, Buffer.from(data))
+  return filePath
+})
+
+export function requestPreviewCapture(payload: any): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (!mainWindow) return reject(new Error('No window'))
+    const replyChannel = `capture:reply:${randomUUID()}`
+    payload.replyChannel = replyChannel
+
+    const timeout = setTimeout(() => {
+      ipcMain.removeAllListeners(replyChannel)
+      reject(new Error('Capture timed out'))
+    }, 60_000)
+
+    ipcMain.once(replyChannel, (_ev, data) => {
+      clearTimeout(timeout)
+      if (data?.error) return reject(new Error(data.error))
+      if (!data?.path) return reject(new Error('No capture path'))
+      resolve(data.path)
+    })
+
+    mainWindow.webContents.send('capture:request', payload)
+  })
+}

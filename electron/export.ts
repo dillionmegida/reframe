@@ -1,8 +1,11 @@
-import { BrowserWindow } from 'electron'
+import { BrowserWindow, ipcMain } from 'electron'
 import ffmpeg from 'fluent-ffmpeg'
-import { buildCropExpression } from '../src/utils/exportExpression'
 import { interpolateAtTime } from '../src/utils/interpolate'
 import type { Project, Slice, Keyframe } from '../src/types'
+import * as fs from 'fs'
+import * as path from 'path'
+import * as os from 'os'
+import { randomUUID } from 'crypto'
 
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path
 ffmpeg.setFfmpegPath(ffmpegPath)
@@ -54,54 +57,188 @@ function buildSliceKeyframes(
   })
 }
 
-function exportSingleSlice(
-  project: Project,
-  slice: Slice,
-  outputPath: string,
-  mainWindow: BrowserWindow,
-  progressOffset: number,
-  progressScale: number
-): Promise<void> {
-  const sliceTrim = { start: slice.start, end: slice.end }
-  const activeKeyframes = buildSliceKeyframes(project.keyframes, slice.start, slice.end)
+/**
+ * Compute crop dimensions matching the preview logic exactly
+ */
+function computeCropForFrame(
+  interp: { x: number; y: number; scale: number },
+  sourceWidth: number,
+  sourceHeight: number,
+  outputWidth: number,
+  outputHeight: number
+): { cropW: number; cropH: number; cropX: number; cropY: number } {
+  const vidAspect = sourceWidth / sourceHeight
+  const outAspect = outputWidth / outputHeight
 
-  const cropExpr = buildCropExpression(
-    activeKeyframes,
-    sliceTrim,
+  let cropFracW: number
+  let cropFracH: number
+  if (outAspect < vidAspect) {
+    cropFracH = 1 / Math.max(interp.scale, 0.0001)
+    cropFracW = (outAspect / vidAspect) * cropFracH
+  } else {
+    cropFracW = 1 / Math.max(interp.scale, 0.0001)
+    cropFracH = (vidAspect / outAspect) * cropFracW
+  }
+
+  cropFracW = Math.min(1, Math.max(0.0001, cropFracW))
+  cropFracH = Math.min(1, Math.max(0.0001, cropFracH))
+
+  const cropW = Math.floor((cropFracW * sourceWidth) / 2) * 2
+  const cropH = Math.floor((cropFracH * sourceHeight) / 2) * 2
+  const cropX = Math.floor(((sourceWidth - cropW) * Math.max(0, Math.min(1, interp.x))) / 2) * 2
+  const cropY = Math.floor(((sourceHeight - cropH) * Math.max(0, Math.min(1, interp.y))) / 2) * 2
+
+  return { cropW, cropH, cropX, cropY }
+}
+
+interface Segment {
+  start: number
+  end: number
+  hasZoomChange: boolean
+}
+
+// Request renderer to capture preview for a slice; returns video file path
+function requestPreviewCapture(
+  mainWindow: BrowserWindow,
+  payload: {
+    videoPath: string
+    start: number
+    end: number
+    fps: number
+    outputWidth: number
+    outputHeight: number
+    keyframes: Keyframe[]
+    videoWidth: number
+    videoHeight: number
+  }
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const replyChannel = `capture:reply:${randomUUID()}`
+    const timeout = setTimeout(() => {
+      ipcMain.removeAllListeners(replyChannel)
+      reject(new Error('Capture timed out'))
+    }, 60_000)
+
+    ipcMain.once(replyChannel, (_ev, data) => {
+      clearTimeout(timeout)
+      if (data?.error) return reject(new Error(data.error))
+      if (!data?.path) return reject(new Error('No capture path'))
+      resolve(data.path)
+    })
+
+    mainWindow.webContents.send('capture:request', {
+      ...payload,
+      replyChannel,
+    })
+  })
+}
+
+// Capture-based slow segment: renderer records preview; main muxes audio
+async function exportSegmentSlow(
+  project: Project,
+  segment: Segment,
+  outputPath: string,
+  keyframes: Keyframe[],
+  _tempDir: string,
+  mainWindow: BrowserWindow
+): Promise<void> {
+  const duration = segment.end - segment.start
+  const fps = 30
+
+  const capturePath = await requestPreviewCapture(mainWindow, {
+    videoPath: project.videoPath,
+    start: segment.start,
+    end: segment.end,
+    fps,
+    outputWidth: project.outputWidth,
+    outputHeight: project.outputHeight,
+    keyframes,
+    videoWidth: project.videoWidth,
+    videoHeight: project.videoHeight,
+  })
+
+  // Mux captured video with source audio slice
+  return new Promise((resolve, reject) => {
+    ffmpeg()
+      .input(capturePath)
+      .input(project.videoPath)
+      .inputOptions([
+        '-ss', String(segment.start),
+        '-t', String(duration),
+      ])
+      .outputOptions([
+        '-map', '0:v',
+        '-map', '1:a?',
+        '-c:v', 'libx264', // transcode VP9 webm to h264 mp4
+        '-preset', 'veryfast',
+        '-crf', '18',
+        '-c:a', 'aac',
+        '-shortest',
+      ])
+      .output(outputPath)
+      .on('end', () => resolve())
+      .on('error', (err: Error) => reject(err))
+      .run()
+  })
+}
+
+async function exportSegmentFast(
+  project: Project,
+  segment: Segment,
+  outputPath: string,
+  keyframes: Keyframe[]
+): Promise<void> {
+  // Use static crop at segment start
+  const interp = interpolateAtTime(keyframes, segment.start)
+  const crop = computeCropForFrame(
+    interp,
     project.videoWidth,
     project.videoHeight,
     project.outputWidth,
     project.outputHeight
   )
 
-  console.log('[Export] Source dims:', project.videoWidth, 'x', project.videoHeight)
-  console.log('[Export] Output dims:', project.outputWidth, 'x', project.outputHeight)
-  console.log('[Export] Slice:', slice.start, '→', slice.end)
-  console.log('[Export] Filter (first 300 chars):', cropExpr.substring(0, 300))
-
   return new Promise((resolve, reject) => {
     ffmpeg(project.videoPath)
       .inputOptions([
-        '-ss', String(slice.start),
-        '-t', String(slice.end - slice.start),
+        '-ss', String(segment.start),
+        '-t', String(segment.end - segment.start),
       ])
       .outputOptions([
-        '-vf', cropExpr,
-        '-preset', 'medium',
-        '-crf', '18',
+        '-vf', `crop=${crop.cropW}:${crop.cropH}:${crop.cropX}:${crop.cropY},scale=${project.outputWidth}:${project.outputHeight}`,
+        '-c:v', 'h264_videotoolbox', // GPU acceleration on macOS
+        '-b:v', '5M',
+        '-c:a', 'aac',
       ])
-      .audioCodec('aac')
-      .videoCodec('libx264')
       .output(outputPath)
-      .on('progress', (p: any) => {
-        const slicePct = p.percent ?? 0
-        const overallPct = progressOffset + slicePct * progressScale
-        mainWindow.webContents.send('export:progress', overallPct)
-      })
       .on('end', () => resolve())
       .on('error', (err: Error) => reject(err))
       .run()
   })
+}
+
+async function exportSingleSlice(
+  project: Project,
+  slice: Slice,
+  outputPath: string,
+  mainWindow: BrowserWindow,
+  _progressOffset: number,
+  _progressScale: number
+): Promise<void> {
+  const activeKeyframes = buildSliceKeyframes(project.keyframes, slice.start, slice.end)
+
+  // Capture-based export for full slice (smooth zoom)
+  const tempDir = path.join(os.tmpdir(), `reframe-export-${Date.now()}`)
+  fs.mkdirSync(tempDir, { recursive: true })
+
+  try {
+    await exportSegmentSlow(project, { start: slice.start, end: slice.end, hasZoomChange: true }, outputPath, activeKeyframes, tempDir, mainWindow)
+    mainWindow.webContents.send('export:progress', _progressOffset + 100 * _progressScale)
+  } finally {
+    if (fs.existsSync(tempDir)) {
+      fs.rmSync(tempDir, { recursive: true, force: true })
+    }
+  }
 }
 
 export async function exportVideo(
@@ -114,51 +251,16 @@ export async function exportVideo(
 
   // No slices: export full trim range
   if (!exportSlices) {
-    const sliceTrim = { start: project.trim.start, end: project.trim.end }
-    const activeKeyframes = buildSliceKeyframes(
-      project.keyframes,
-      project.trim.start,
-      project.trim.end
-    )
+    const slice: Slice = {
+      id: 'full-trim',
+      start: project.trim.start,
+      end: project.trim.end,
+      status: 'keep',
+    }
 
-    const cropExpr = buildCropExpression(
-      activeKeyframes,
-      sliceTrim,
-      project.videoWidth,
-      project.videoHeight,
-      project.outputWidth,
-      project.outputHeight
-    )
-
-    console.log('[Export] Source dims:', project.videoWidth, 'x', project.videoHeight)
-    console.log('[Export] Output dims:', project.outputWidth, 'x', project.outputHeight)
-    console.log('[Export] Trim:', project.trim.start, '→', project.trim.end)
-    console.log('[Export] Filter (first 300 chars):', cropExpr.substring(0, 300))
-
-    return new Promise((resolve, reject) => {
-      ffmpeg(project.videoPath)
-        .inputOptions([
-          '-ss', String(project.trim.start),
-          '-t', String(project.trim.end - project.trim.start),
-        ])
-        .outputOptions([
-          '-vf', cropExpr,
-          '-preset', 'medium',
-          '-crf', '18',
-        ])
-        .audioCodec('aac')
-        .videoCodec('libx264')
-        .output(outputDir)
-        .on('progress', (p: any) => {
-          mainWindow.webContents.send('export:progress', p.percent ?? 0)
-        })
-        .on('end', () => {
-          mainWindow.webContents.send('export:done', outputDir)
-          resolve([outputDir])
-        })
-        .on('error', (err: Error) => reject(err))
-        .run()
-    })
+    await exportSingleSlice(project, slice, outputDir, mainWindow, 0, 1)
+    mainWindow.webContents.send('export:done', outputDir)
+    return [outputDir]
   }
 
   // Multi-slice export
