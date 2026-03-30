@@ -211,6 +211,37 @@ const ContextMenuItem = styled.button`
   }
 `
 
+function computeOutputDimensions(
+  sourceWidth: number,
+  sourceHeight: number,
+  ratio: '9:16' | '4:5' | '1:1'
+): { outputWidth: number; outputHeight: number } {
+  const ratioMap = {
+    '9:16': 9 / 16,
+    '4:5': 4 / 5,
+    '1:1': 1,
+  }
+
+  const outAspect = ratioMap[ratio]
+  const vidAspect = sourceWidth / sourceHeight
+
+  let outputWidth: number
+  let outputHeight: number
+
+  if (outAspect < vidAspect) {
+    // Output narrower than source — height-limited
+    // Use full source height, derive width from ratio
+    outputHeight = sourceHeight
+    outputWidth = Math.floor((outputHeight * outAspect) / 2) * 2
+  } else {
+    // Output wider than source — width-limited
+    outputWidth = sourceWidth
+    outputHeight = Math.floor((outputWidth / outAspect) / 2) * 2
+  }
+
+  return { outputWidth, outputHeight }
+}
+
 export default function ProjectDetail({ projectId }: { projectId: string }) {
   const projects = useAppStore((s) => s.projects)
   const allVideos = useAppStore((s) => s.videos)
@@ -235,14 +266,21 @@ export default function ProjectDetail({ projectId }: { projectId: string }) {
       setError(null)
       try {
         const meta = await window.electron.getVideoMetadata(filePath)
+        const outputRatio: '9:16' | '4:5' | '1:1' = '9:16'
+        const { outputWidth, outputHeight } = computeOutputDimensions(
+          meta.width,
+          meta.height,
+          outputRatio
+        )
+
         const videoId = addVideo(projectId, {
           videoPath: filePath,
           videoDuration: meta.duration,
           videoWidth: meta.width,
           videoHeight: meta.height,
-          outputRatio: '9:16',
-          outputWidth: 1080,
-          outputHeight: 1920,
+          outputRatio,
+          outputWidth,
+          outputHeight,
           trim: { start: 0, end: meta.duration },
           keyframes: [
             {

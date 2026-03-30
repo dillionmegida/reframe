@@ -11,10 +11,43 @@ function formatTime(s: number): string {
   return `${String(m).padStart(2, '0')}:${sec.toFixed(1).padStart(4, '0')}`
 }
 
-const ratioOptions: { label: string; value: AspectRatio; w: number; h: number }[] = [
-  { label: '9:16', value: '9:16', w: 1080, h: 1920 },
-  { label: '4:5', value: '4:5', w: 1080, h: 1350 },
-  { label: '1:1', value: '1:1', w: 1080, h: 1080 },
+type OutputRatio = '9:16' | '4:5' | '1:1'
+
+function computeOutputDimensions(
+  sourceWidth: number,
+  sourceHeight: number,
+  ratio: OutputRatio
+): { outputWidth: number; outputHeight: number } {
+  const ratioMap = {
+    '9:16': 9 / 16,
+    '4:5': 4 / 5,
+    '1:1': 1,
+  }
+
+  const outAspect = ratioMap[ratio]
+  const vidAspect = sourceWidth / sourceHeight
+
+  let outputWidth: number
+  let outputHeight: number
+
+  if (outAspect < vidAspect) {
+    // Output narrower than source — height-limited
+    // Use full source height, derive width from ratio
+    outputHeight = sourceHeight
+    outputWidth = Math.floor((outputHeight * outAspect) / 2) * 2
+  } else {
+    // Output wider than source — width-limited
+    outputWidth = sourceWidth
+    outputHeight = Math.floor((outputWidth / outAspect) / 2) * 2
+  }
+
+  return { outputWidth, outputHeight }
+}
+
+const ratioOptions: { label: string; value: OutputRatio }[] = [
+  { label: '9:16', value: '9:16' },
+  { label: '4:5', value: '4:5' },
+  { label: '1:1', value: '1:1' },
 ]
 
 const Bar = styled.div`
@@ -348,7 +381,14 @@ export default function Toolbar() {
             <RatioButton
               key={opt.value}
               $active={project.outputRatio === opt.value}
-              onClick={() => setOutputRatio(opt.value, opt.w, opt.h)}
+              onClick={() => {
+                const { outputWidth, outputHeight } = computeOutputDimensions(
+                  project.videoWidth,
+                  project.videoHeight,
+                  opt.value
+                )
+                setOutputRatio(opt.value, outputWidth, outputHeight)
+              }}
             >
               {opt.label}
             </RatioButton>

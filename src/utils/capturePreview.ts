@@ -1,7 +1,6 @@
 import { interpolateAtTime } from './interpolate'
 import type { Keyframe } from '../types'
 
-// Helper to compute crop same as PreviewPanel
 function computeCrop(
   interp: { x: number; y: number; scale: number },
   sourceWidth: number,
@@ -33,7 +32,15 @@ function computeCrop(
   return { cropW, cropH, cropX, cropY }
 }
 
-// Capture preview using canvas.captureStream + MediaRecorder
+// Bitrate scaled to output resolution:
+// 1080x1920 -> ~8 Mbps, 1214x2160 (4K) -> ~20 Mbps
+function computeBitrate(outputWidth: number, outputHeight: number): number {
+  const pixels = outputWidth * outputHeight
+  const pixels1080p = 1080 * 1920
+  const baseBitrate = 8_000_000
+  return Math.round(baseBitrate * (pixels / pixels1080p))
+}
+
 async function handleCapture(payload: any) {
   try {
     const {
@@ -54,33 +61,45 @@ async function handleCapture(payload: any) {
     video.src = `file://${videoPath}`
     video.crossOrigin = 'anonymous'
     video.muted = true
+    video.playsInline = true
 
     await new Promise((resolve, reject) => {
       video.onloadedmetadata = () => resolve(null)
-      video.onerror = () => reject(new Error('video load failed'))
+      video.onerror = () => reject(new Error('Video failed to load'))
     })
 
     const canvas = document.createElement('canvas')
     canvas.width = outputWidth
     canvas.height = outputHeight
     const ctx = canvas.getContext('2d')
-    if (!ctx) throw new Error('No canvas context')
+    if (!ctx) throw new Error('Could not get canvas 2D context')
 
+    const bitrate = computeBitrate(outputWidth, outputHeight)
     const stream = canvas.captureStream(fps)
     const chunks: BlobPart[] = []
-    const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' })
+
+    const recorder = new MediaRecorder(stream, {
+      mimeType: 'video/webm;codecs=vp9',
+      videoBitsPerSecond: bitrate,
+    })
 
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) chunks.push(e.data)
     }
 
-    const done = new Promise<void>((resolve) => {
+    const recordingDone = new Promise<void>((resolve) => {
       recorder.onstop = () => resolve()
     })
 
-    // Seek to start and play
+    // Seek to start
     video.currentTime = start
-    await new Promise((resolve) => (video.onseeked = () => resolve(null)))
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Seek timed out')), 10_000)
+      video.onseeked = () => {
+        clearTimeout(timeout)
+        resolve()
+      }
+    })
 
     recorder.start()
     await video.play()
@@ -88,54 +107,97 @@ async function handleCapture(payload: any) {
     const vidW = video.videoWidth || videoWidth
     const vidH = video.videoHeight || videoHeight
 
-    let rafId = 0
-    const draw = () => {
-      const t = video.currentTime
-      if (t >= end || video.ended) {
-        recorder.stop()
-        cancelAnimationFrame(rafId)
-        video.pause()
-        return
-      }
+    // Use requestVideoFrameCallback if available — fires exactly once per decoded
+    // video frame with the precise frame timestamp, eliminating rAF timing jitter
+    // that causes choppy playback on iPhone.
+    // Falls back to requestAnimationFrame on browsers that don't support it.
+    const supportsRVFC = 'requestVideoFrameCallback' in video
 
-      const interp = interpolateAtTime(keyframes as Keyframe[], t)
-      const { cropW, cropH, cropX, cropY } = computeCrop(
-        interp,
-        vidW,
-        vidH,
-        outputWidth,
-        outputHeight
-      )
+    if (supportsRVFC) {
+      await new Promise<void>((resolve) => {
+        const onFrame = (_now: number, meta: { mediaTime: number }) => {
+          const t = meta.mediaTime
 
-      ctx.clearRect(0, 0, outputWidth, outputHeight)
-      ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, outputWidth, outputHeight)
+          if (t >= end || video.ended) {
+            recorder.stop()
+            video.pause()
+            resolve()
+            return
+          }
 
-      if (progressChannel) {
-        const pct = ((t - start) / (end - start)) * 100
-        ;(window as any).electron.respondCaptureProgress(progressChannel, { progress: pct })
-      }
+          const interp = interpolateAtTime(keyframes as Keyframe[], t)
+          const { cropW, cropH, cropX, cropY } = computeCrop(
+            interp, vidW, vidH, outputWidth, outputHeight
+          )
 
-      rafId = requestAnimationFrame(draw)
+          ctx.clearRect(0, 0, outputWidth, outputHeight)
+          ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, outputWidth, outputHeight)
+
+          if (progressChannel) {
+            const pct = Math.min(100, ((t - start) / (end - start)) * 100)
+            ;(window as any).electron.respondCaptureProgress(progressChannel, { progress: pct })
+          }
+
+          ;(video as any).requestVideoFrameCallback(onFrame)
+        }
+
+        ;(video as any).requestVideoFrameCallback(onFrame)
+      })
+    } else {
+      // rAF fallback
+      await new Promise<void>((resolve) => {
+        let rafId = 0
+
+        const draw = () => {
+          const t = video.currentTime
+
+          if (t >= end || video.ended) {
+            recorder.stop()
+            cancelAnimationFrame(rafId)
+            video.pause()
+            resolve()
+            return
+          }
+
+          const interp = interpolateAtTime(keyframes as Keyframe[], t)
+          const { cropW, cropH, cropX, cropY } = computeCrop(
+            interp, vidW, vidH, outputWidth, outputHeight
+          )
+
+          ctx.clearRect(0, 0, outputWidth, outputHeight)
+          ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, outputWidth, outputHeight)
+
+          if (progressChannel) {
+            const pct = Math.min(100, ((t - start) / (end - start)) * 100)
+            ;(window as any).electron.respondCaptureProgress(progressChannel, { progress: pct })
+          }
+
+          rafId = requestAnimationFrame(draw)
+        }
+
+        rafId = requestAnimationFrame(draw)
+      })
     }
 
-    rafId = requestAnimationFrame(draw)
+    await recordingDone
 
-    await done
+    if (progressChannel) {
+      ;(window as any).electron.respondCaptureProgress(progressChannel, { progress: 100 })
+    }
 
     const blob = new Blob(chunks, { type: 'video/webm' })
     const buf = new Uint8Array(await blob.arrayBuffer())
     const tempPath = await (window as any).electron.saveTempBlob(buf, 'webm')
     ;(window as any).electron.respondCapture(replyChannel, { path: tempPath })
-    if (progressChannel) {
-      ;(window as any).electron.respondCaptureProgress(progressChannel, { progress: 100 })
-    }
   } catch (err: any) {
-    console.error('capture error', err)
-    ;(window as any).electron.respondCapture(payload.replyChannel, { error: err?.message || 'capture failed' })
+    console.error('[capturePreview] error:', err)
+    ;(window as any).electron.respondCapture(payload.replyChannel, {
+      error: err?.message || 'Capture failed',
+    })
   }
 }
 
-// Register listener once
+// Register listener once at module load
 ;(window as any).electron.onCaptureRequest((payload: any) => {
   handleCapture(payload)
 })

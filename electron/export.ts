@@ -10,11 +10,10 @@ import { randomUUID } from 'crypto'
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path
 ffmpeg.setFfmpegPath(ffmpegPath)
 
-/**
- * Build effective keyframes for a slice by interpolating at its boundaries
- * using the full keyframe set. Ensures the export curve matches the preview
- * at slice edges even when keyframes fall outside the slice range.
- */
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
 function buildSliceKeyframes(
   allKeyframes: Keyframe[],
   sliceStart: number,
@@ -44,12 +43,12 @@ function buildSliceKeyframes(
   }
 
   const interior = sorted.filter(
-    kf => kf.timestamp > sliceStart && kf.timestamp < sliceEnd
+    (kf) => kf.timestamp > sliceStart && kf.timestamp < sliceEnd
   )
 
   const result = [startKf, ...interior, endKf]
   const seen = new Set<number>()
-  return result.filter(kf => {
+  return result.filter((kf) => {
     const key = Math.round(kf.timestamp * 10000)
     if (seen.has(key)) return false
     seen.add(key)
@@ -57,56 +56,24 @@ function buildSliceKeyframes(
   })
 }
 
-/**
- * Compute crop dimensions matching the preview logic exactly
- */
-function computeCropForFrame(
-  interp: { x: number; y: number; scale: number },
-  sourceWidth: number,
-  sourceHeight: number,
-  outputWidth: number,
-  outputHeight: number
-): { cropW: number; cropH: number; cropX: number; cropY: number } {
-  const vidAspect = sourceWidth / sourceHeight
-  const outAspect = outputWidth / outputHeight
-
-  let cropFracW: number
-  let cropFracH: number
-  if (outAspect < vidAspect) {
-    cropFracH = 1 / Math.max(interp.scale, 0.0001)
-    cropFracW = (outAspect / vidAspect) * cropFracH
-  } else {
-    cropFracW = 1 / Math.max(interp.scale, 0.0001)
-    cropFracH = (vidAspect / outAspect) * cropFracW
-  }
-
-  cropFracW = Math.min(1, Math.max(0.0001, cropFracW))
-  cropFracH = Math.min(1, Math.max(0.0001, cropFracH))
-
-  const cropW = Math.floor((cropFracW * sourceWidth) / 2) * 2
-  const cropH = Math.floor((cropFracH * sourceHeight) / 2) * 2
-  const cropX = Math.floor(((sourceWidth - cropW) * Math.max(0, Math.min(1, interp.x))) / 2) * 2
-  const cropY = Math.floor(((sourceHeight - cropH) * Math.max(0, Math.min(1, interp.y))) / 2) * 2
-
-  return { cropW, cropH, cropX, cropY }
-}
-
-interface Segment {
-  start: number
-  end: number
-  hasZoomChange: boolean
-}
-
-// Emit per-slice progress updates to renderer
 function sendSliceProgress(
   mainWindow: BrowserWindow,
-  payload: { sliceId: string; progress: number; state?: 'progress' | 'done' | 'error'; path?: string; error?: string }
+  payload: {
+    sliceId: string
+    progress: number
+    state?: 'progress' | 'done' | 'error'
+    path?: string
+    error?: string
+  }
 ) {
   const clamped = Math.max(0, Math.min(100, payload.progress))
   mainWindow.webContents.send('export:progress', { ...payload, progress: clamped })
 }
 
-// Request renderer to capture preview for a slice; returns video file path
+// ---------------------------------------------------------------------------
+// Phase 1: capture (renderer, sequential)
+// ---------------------------------------------------------------------------
+
 function requestPreviewCapture(
   mainWindow: BrowserWindow,
   payload: {
@@ -125,17 +92,25 @@ function requestPreviewCapture(
   return new Promise((resolve, reject) => {
     const replyChannel = `capture:reply:${randomUUID()}`
     const progressChannel = `${replyChannel}:progress`
+
+    // Scale timeout to clip duration: min 60s, max 20 minutes
+    const clipDuration = payload.end - payload.start
+    const timeoutMs = Math.min(
+      Math.max(60_000, (clipDuration + 30) * 1000),
+      20 * 60 * 1000
+    )
+
     const timeout = setTimeout(() => {
       ipcMain.removeAllListeners(replyChannel)
       ipcMain.removeAllListeners(progressChannel)
-      reject(new Error('Capture timed out'))
-    }, 60_000)
+      reject(new Error(`Capture timed out after ${Math.round(timeoutMs / 1000)}s`))
+    }, timeoutMs)
 
     ipcMain.once(replyChannel, (_ev, data) => {
       clearTimeout(timeout)
       ipcMain.removeAllListeners(progressChannel)
       if (data?.error) return reject(new Error(data.error))
-      if (!data?.path) return reject(new Error('No capture path'))
+      if (!data?.path) return reject(new Error('No capture path returned'))
       resolve(data.path)
     })
 
@@ -154,132 +129,159 @@ function requestPreviewCapture(
   })
 }
 
-// Capture-based slow segment: renderer records preview; main muxes audio
-async function exportSegmentSlow(
-  project: Project,
-  segment: Segment,
+// ---------------------------------------------------------------------------
+// Phase 2: mux (main process, ffmpeg — runs concurrently with other muxes)
+// ---------------------------------------------------------------------------
+
+function muxCaptureWithAudio(
+  capturePath: string,
+  sourceVideoPath: string,
   outputPath: string,
-  keyframes: Keyframe[],
-  _tempDir: string,
-  mainWindow: BrowserWindow,
-  sliceId: string
+  segmentStart: number,
+  duration: number,
+  fps: number
 ): Promise<void> {
-  const duration = segment.end - segment.start
-  const fps = 30
-
-  const capturePath = await requestPreviewCapture(mainWindow, {
-    videoPath: project.videoPath,
-    start: segment.start,
-    end: segment.end,
-    fps,
-    outputWidth: project.outputWidth,
-    outputHeight: project.outputHeight,
-    keyframes,
-    videoWidth: project.videoWidth,
-    videoHeight: project.videoHeight,
-  }, (pct) => {
-    sendSliceProgress(mainWindow, { sliceId, progress: pct * 0.9 })
-  })
-
-  // Mux captured video with source audio slice
   return new Promise((resolve, reject) => {
     ffmpeg()
       .input(capturePath)
-      .input(project.videoPath)
+      .input(sourceVideoPath)
       .inputOptions([
-        '-ss', String(segment.start),
+        '-ss', String(segmentStart),
         '-t', String(duration),
       ])
       .outputOptions([
         '-map', '0:v',
         '-map', '1:a?',
-        '-c:v', 'libx264', // transcode VP9 webm to h264 mp4
+        '-c:v', 'libx264',
         '-preset', 'veryfast',
-        '-crf', '18',
+        '-crf', '15',
+        '-r', String(fps),
+        '-vsync', 'cfr',
         '-c:a', 'aac',
+        '-b:a', '256k',
+        '-movflags', '+faststart',
         '-shortest',
       ])
       .output(outputPath)
-      .on('end', () => {
-        // Final bump to near completion; caller will send 100%
-        sendSliceProgress(mainWindow, { sliceId, progress: 95 })
-        resolve()
-      })
+      .on('end', resolve)
       .on('error', (err: Error) => reject(err))
       .run()
   })
 }
 
-async function exportSegmentFast(
-  project: Project,
-  segment: Segment,
-  outputPath: string,
-  keyframes: Keyframe[]
-): Promise<void> {
-  // Use static crop at segment start
-  const interp = interpolateAtTime(keyframes, segment.start)
-  const crop = computeCropForFrame(
-    interp,
-    project.videoWidth,
-    project.videoHeight,
-    project.outputWidth,
-    project.outputHeight
-  )
+// ---------------------------------------------------------------------------
+// Pipeline
+//
+// The idea: captures are sequential (one at a time in the renderer) but each
+// mux starts immediately after its capture finishes, without waiting for the
+// next capture to complete. So while slice N+1 is being captured, slice N's
+// mux is already running in parallel in the main process.
+//
+// Timeline for 3 slices:
+//
+//   [capture 1]
+//              [capture 2] [mux 1 ...]
+//                          [capture 3] [mux 2 ...]
+//                                                  [mux 3 ...]
+//
+// vs fully sequential:
+//   [capture 1][mux 1][capture 2][mux 2][capture 3][mux 3]
+//
+// The total time saved is (N-1) * avg_mux_duration.
+// ---------------------------------------------------------------------------
 
-  return new Promise((resolve, reject) => {
-    ffmpeg(project.videoPath)
-      .inputOptions([
-        '-ss', String(segment.start),
-        '-t', String(segment.end - segment.start),
-      ])
-      .outputOptions([
-        '-vf', `crop=${crop.cropW}:${crop.cropH}:${crop.cropX}:${crop.cropY},scale=${project.outputWidth}:${project.outputHeight}`,
-        '-c:v', 'h264_videotoolbox', // GPU acceleration on macOS
-        '-b:v', '5M',
-        '-c:a', 'aac',
-      ])
-      .output(outputPath)
-      .on('end', () => resolve())
-      .on('error', (err: Error) => reject(err))
-      .run()
-  })
+interface SliceJob {
+  slice: Slice
+  outputPath: string
+  activeKeyframes: Keyframe[]
 }
 
-async function exportSingleSlice(
+async function runPipeline(
+  jobs: SliceJob[],
   project: Project,
-  slice: Slice,
-  outputPath: string,
-  mainWindow: BrowserWindow
+  mainWindow: BrowserWindow,
+  fps: number
 ): Promise<void> {
-  const activeKeyframes = buildSliceKeyframes(project.keyframes, slice.start, slice.end)
+  // Tracks in-flight mux promises so we can await them all at the end
+  const muxPromises: Promise<void>[] = []
 
-  // Capture-based export for full slice (smooth zoom)
-  const tempDir = path.join(os.tmpdir(), `reframe-export-${Date.now()}`)
-  fs.mkdirSync(tempDir, { recursive: true })
+  for (const job of jobs) {
+    const { slice, outputPath, activeKeyframes } = job
+    const duration = slice.end - slice.start
 
-  try {
     sendSliceProgress(mainWindow, { sliceId: slice.id, progress: 0, state: 'progress' })
 
-    await exportSegmentSlow(
-      project,
-      { start: slice.start, end: slice.end, hasZoomChange: true },
-      outputPath,
-      activeKeyframes,
-      tempDir,
+    // --- Capture (sequential — renderer can only do one at a time) ---
+    const capturePath = await requestPreviewCapture(
       mainWindow,
-      slice.id
+      {
+        videoPath: project.videoPath,
+        start: slice.start,
+        end: slice.end,
+        fps,
+        outputWidth: project.outputWidth,
+        outputHeight: project.outputHeight,
+        keyframes: activeKeyframes,
+        videoWidth: project.videoWidth,
+        videoHeight: project.videoHeight,
+      },
+      (pct) => {
+        // Capture = 0–80% of reported progress; mux = 80–100%
+        sendSliceProgress(mainWindow, { sliceId: slice.id, progress: pct * 0.8 })
+      }
     )
 
-    sendSliceProgress(mainWindow, { sliceId: slice.id, progress: 100, state: 'done', path: outputPath })
-  } finally {
-    if (fs.existsSync(tempDir)) {
-      fs.rmSync(tempDir, { recursive: true, force: true })
-    }
+    sendSliceProgress(mainWindow, { sliceId: slice.id, progress: 80 })
+
+    // --- Mux (fire-and-forget into the pool; does NOT block the next capture) ---
+    const muxPromise = muxCaptureWithAudio(
+      capturePath,
+      project.videoPath,
+      outputPath,
+      slice.start,
+      duration,
+      fps
+    )
+      .then(() => {
+        sendSliceProgress(mainWindow, {
+          sliceId: slice.id,
+          progress: 100,
+          state: 'done',
+          path: outputPath,
+        })
+      })
+      .catch((err: Error) => {
+        sendSliceProgress(mainWindow, {
+          sliceId: slice.id,
+          progress: 80,
+          state: 'error',
+          error: err.message,
+        })
+        // Re-throw so the outer Promise.all surfaces the error
+        throw err
+      })
+
+    muxPromises.push(muxPromise)
+
+    // Next iteration immediately starts the next capture while this mux runs
   }
+
+  // Wait for all muxes to finish before returning
+  await Promise.all(muxPromises)
 }
 
+// ---------------------------------------------------------------------------
+// Public entry point
+// ---------------------------------------------------------------------------
+
 export async function exportVideo(
-  args: { project: Project; slices?: Slice[] },
+  args: {
+    project: Project
+    slices?: Slice[]
+    basePath?: string
+    projectName?: string
+    videoId?: string
+  },
   outputDir: string,
   mainWindow: BrowserWindow
 ): Promise<string[]> {
@@ -287,48 +289,86 @@ export async function exportVideo(
   const exportSlices = slices && slices.length > 0 ? slices : undefined
 
   const results: { sliceId: string; path: string }[] = []
+  const fps = 30
 
-  // No slices: export full trim range
-  if (!exportSlices) {
-    const slice: Slice = {
-      id: 'full-trim',
-      start: project.trim.start,
-      end: project.trim.end,
-      status: 'keep',
-    }
+  // Resolution label for filename e.g. "1214x2160"
+  const resLabel = `${project.outputWidth}x${project.outputHeight}`
 
-    await exportSingleSlice(project, slice, outputDir, mainWindow)
-    results.push({ sliceId: slice.id, path: outputDir })
-    mainWindow.webContents.send('export:done', { paths: [outputDir], results })
-    return [outputDir]
+  const tempDirs: string[] = []
+
+  const makeTempDir = () => {
+    const dir = path.join(os.tmpdir(), `reframe-export-${randomUUID()}`)
+    fs.mkdirSync(dir, { recursive: true })
+    tempDirs.push(dir)
+    return dir
   }
 
-  // Multi-slice export
-  const outputPaths: string[] = []
-  const total = exportSlices.length
-  const CONCURRENCY = 3
-  let index = 0
+  const cleanup = () => {
+    for (const dir of tempDirs) {
+      try {
+        if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true })
+      } catch {
+        // non-fatal
+      }
+    }
+  }
 
-  const worker = async () => {
-    while (true) {
-      const currentIndex = index
-      if (currentIndex >= total) break
-      index += 1
+  try {
+    // No slices: treat full trim range as a single slice
+    if (!exportSlices) {
+      const slice: Slice = {
+        id: 'full-trim',
+        start: project.trim.start,
+        end: project.trim.end,
+        status: 'keep',
+      }
+      const outputPath = outputDir.replace(/(\.[^.]+)$/, `_${resLabel}$1`)
+      makeTempDir()
 
-      const slice = exportSlices[currentIndex]
+      const jobs: SliceJob[] = [{
+        slice,
+        outputPath,
+        activeKeyframes: buildSliceKeyframes(project.keyframes, slice.start, slice.end),
+      }]
+
+      await runPipeline(jobs, project, mainWindow, fps)
+
+      results.push({ sliceId: slice.id, path: outputPath })
+      mainWindow.webContents.send('export:done', { paths: [outputPath], results })
+      return [outputPath]
+    }
+
+    // Multi-slice: build all jobs first, then run the pipeline
+    const total = exportSlices.length
+    const outputPaths: string[] = []
+
+    const jobs: SliceJob[] = exportSlices.map((slice, i) => {
       const baseName = outputDir.replace(/\.[^.]+$/, '')
-      const slicePath = total === 1 ? outputDir : `${baseName}_slice-${currentIndex + 1}.mp4`
+      const ext = outputDir.match(/(\.[^.]+)$/)?.[1] ?? '.mp4'
+      const outputPath =
+        total === 1
+          ? outputDir.replace(/(\.[^.]+)$/, `_${resLabel}$1`)
+          : `${baseName}_slice-${i + 1}_${resLabel}${ext}`
 
-      await exportSingleSlice(project, slice, slicePath, mainWindow)
+      makeTempDir()
+      outputPaths[i] = outputPath
 
-      outputPaths[currentIndex] = slicePath
-      results.push({ sliceId: slice.id, path: slicePath })
-    }
+      return {
+        slice,
+        outputPath,
+        activeKeyframes: buildSliceKeyframes(project.keyframes, slice.start, slice.end),
+      }
+    })
+
+    await runPipeline(jobs, project, mainWindow, fps)
+
+    outputPaths.forEach((p, i) => {
+      results.push({ sliceId: exportSlices[i].id, path: p })
+    })
+
+    mainWindow.webContents.send('export:done', { paths: outputPaths, results })
+    return outputPaths
+  } finally {
+    cleanup()
   }
-
-  const workers = Array.from({ length: Math.min(CONCURRENCY, total) }, () => worker())
-  await Promise.all(workers)
-
-  mainWindow.webContents.send('export:done', { paths: outputPaths, results })
-  return outputPaths
 }
