@@ -16,6 +16,15 @@ export interface TrimRange {
   end: number
 }
 
+export type SliceStatus = 'keep' | 'hidden'
+
+export interface Slice {
+  id: string
+  start: number
+  end: number
+  status: SliceStatus
+}
+
 export interface ReframeProject {
   id: string
   name: string
@@ -34,10 +43,12 @@ export interface VideoEntry {
   outputHeight: number
   trim: TrimRange
   keyframes: Keyframe[]
+  slices: Slice[]
   addedAt: number
 }
 
 export interface AppData {
+  basePath: string | null
   projects: ReframeProject[]
   videos: VideoEntry[]
 }

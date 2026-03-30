@@ -19,4 +19,9 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.on('export:done', (_: any, p: string) => cb(p))
   },
   showInFolder: (path: string) => ipcRenderer.invoke('show-in-folder', path),
+
+  // Directory operations
+  selectDirectory: () => ipcRenderer.invoke('select-directory'),
+  ensureDirectory: (path: string) => ipcRenderer.invoke('ensure-directory', path),
+  removeDirectory: (path: string) => ipcRenderer.invoke('remove-directory', path),
 })

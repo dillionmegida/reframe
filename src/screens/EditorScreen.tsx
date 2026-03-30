@@ -12,12 +12,16 @@ export default function EditorScreen() {
   const isPlaying = useEditorStore((s) => s.isPlaying)
   const currentTime = useEditorStore((s) => s.currentTime)
   const selectedKeyframeId = useEditorStore((s) => s.selectedKeyframeId)
+  const selectedSliceId = useEditorStore((s) => s.selectedSliceId)
   const setPlaying = useEditorStore((s) => s.setPlaying)
   const setCurrentTime = useEditorStore((s) => s.setCurrentTime)
   const selectKeyframe = useEditorStore((s) => s.selectKeyframe)
   const addOrUpdateKeyframe = useEditorStore((s) => s.addOrUpdateKeyframe)
   const deleteKeyframe = useEditorStore((s) => s.deleteKeyframe)
   const cloneKeyframeMinus = useEditorStore((s) => s.cloneKeyframeMinus)
+  const addSlice = useEditorStore((s) => s.addSlice)
+  const selectSlice = useEditorStore((s) => s.selectSlice)
+  const deleteSlice = useEditorStore((s) => s.deleteSlice)
   const undo = useEditorStore((s) => s.undo)
   const redo = useEditorStore((s) => s.redo)
   const updateVideo = useAppStore((s) => s.updateVideo)
@@ -69,7 +73,16 @@ export default function EditorScreen() {
         return
       }
 
+      if (e.code === 'KeyS' && !e.metaKey && !e.ctrlKey) {
+        addSlice(currentTime)
+        return
+      }
+
       if (e.code === 'Backspace' || e.code === 'Delete') {
+        if (selectedSliceId) {
+          deleteSlice(selectedSliceId)
+          return
+        }
         if (selectedKeyframeId) {
           deleteKeyframe(selectedKeyframeId)
         }
@@ -85,6 +98,7 @@ export default function EditorScreen() {
 
       if (e.code === 'Escape') {
         selectKeyframe(null)
+        selectSlice(null)
         return
       }
 
@@ -109,12 +123,16 @@ export default function EditorScreen() {
       isPlaying,
       currentTime,
       selectedKeyframeId,
+      selectedSliceId,
       setPlaying,
       setCurrentTime,
       selectKeyframe,
       addOrUpdateKeyframe,
       deleteKeyframe,
       cloneKeyframeMinus,
+      addSlice,
+      selectSlice,
+      deleteSlice,
       undo,
       redo,
     ]
@@ -132,13 +150,14 @@ export default function EditorScreen() {
       updateVideo(project.id, {
         keyframes: project.keyframes,
         trim: project.trim,
+        slices: project.slices,
         outputRatio: project.outputRatio,
         outputWidth: project.outputWidth,
         outputHeight: project.outputHeight,
       })
     }, 500)
     return () => clearTimeout(timer)
-  }, [project?.keyframes, project?.trim, project?.outputRatio, project?.id, updateVideo])
+  }, [project?.keyframes, project?.trim, project?.slices, project?.outputRatio, project?.id, updateVideo])
 
   if (!project) return null
 

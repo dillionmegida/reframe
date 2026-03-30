@@ -1,123 +1,73 @@
 import type { Keyframe, TrimRange } from '../types'
-import { applyEasing } from './easing'
+import { interpolateAtTime } from './interpolate'
 
+const SAMPLE_INTERVAL = 0.1
+
+interface Sample {
+  t: number       // time relative to trim.start (0-based, matches ffmpeg's in_time)
+  zoom: number    // zoompan zoom level (≥1)
+  panX: number    // zoompan x position (pixels in zoomed space)
+  panY: number    // zoompan y position (pixels in zoomed space)
+}
+
+/**
+ * Build the ffmpeg -vf filter string for export using the zoompan filter.
+ *
+ * zoompan outputs a fixed-size frame on every input frame — no filter reinit errors.
+ *
+ * How zoom/pan map to the preview:
+ *   Preview: cropFracH = 1/scale  (portrait-on-landscape case)
+ *   zoompan: visible fraction = 1/zoom
+ *   → zoom = scale (direct mapping)
+ *
+ *   Preview: cropX = (srcW - cropW) * x,  cropY = (srcH - cropH) * y
+ *   zoompan: the zoomed virtual image is iw*zoom × ih*zoom,
+ *            the output window is ow × oh,
+ *            pan_x = (iw*zoom - ow) * x,  pan_y = (ih*zoom - oh) * y
+ *
+ * d=1 means one output frame per input frame (preserve original fps).
+ * s=WxH sets fixed output resolution.
+ */
 export function buildCropExpression(
   keyframes: Keyframe[],
   trim: TrimRange,
   sourceWidth: number,
   sourceHeight: number,
   outputWidth: number,
-  outputHeight: number
+  outputHeight: number,
+  fps: number = 30
 ): string {
-  const sorted = [...keyframes].sort((a, b) => a.timestamp - b.timestamp)
+  const outW = Math.floor(outputWidth / 2) * 2
+  const outH = Math.floor(outputHeight / 2) * 2
 
-  if (sorted.length === 0) {
-    const cropW = sourceWidth
-    const cropH = cropW * (outputHeight / outputWidth)
-    const cropX = 0.5 * (sourceWidth - cropW)
-    const cropY = 0.5 * (sourceHeight - cropH)
-    return `crop=w=${Math.round(cropW)}:h=${Math.round(cropH)}:x=${Math.round(cropX)}:y=${Math.round(cropY)},scale=${outputWidth}:${outputHeight}`
+  const kfs = keyframes.length > 0
+    ? keyframes
+    : [{ id: '', timestamp: trim.start, x: 0.5, y: 0.5, scale: 1.0, easing: 'linear' as const }]
+
+  // Use interpolation at the slice start time (static crop for now)
+  const interp = interpolateAtTime(kfs, trim.start)
+
+  // Match preview crop calculation exactly
+  const vidAspect = sourceWidth / sourceHeight
+  const outAspect = outW / outH
+
+  let cropFracW: number
+  let cropFracH: number
+  if (outAspect < vidAspect) {
+    cropFracH = 1 / Math.max(interp.scale, 0.0001)
+    cropFracW = (outAspect / vidAspect) * cropFracH
+  } else {
+    cropFracW = 1 / Math.max(interp.scale, 0.0001)
+    cropFracH = (vidAspect / outAspect) * cropFracW
   }
 
-  if (sorted.length === 1) {
-    const kf = sorted[0]
-    const cropW = sourceWidth / kf.scale
-    const cropH = cropW * (outputHeight / outputWidth)
-    const cropX = kf.x * (sourceWidth - cropW)
-    const cropY = kf.y * (sourceHeight - cropH)
-    return `crop=w=${Math.round(cropW)}:h=${Math.round(cropH)}:x=${Math.round(cropX)}:y=${Math.round(cropY)},scale=${outputWidth}:${outputHeight}`
-  }
+  cropFracW = Math.min(1, Math.max(0.0001, cropFracW))
+  cropFracH = Math.min(1, Math.max(0.0001, cropFracH))
 
-  const buildDimExpr = (dim: 'w' | 'h' | 'x' | 'y'): string => {
-    const segments: string[] = []
+  const cropW = Math.floor((cropFracW * sourceWidth) / 2) * 2
+  const cropH = Math.floor((cropFracH * sourceHeight) / 2) * 2
+  const cropX = Math.floor(((sourceWidth - cropW) * Math.max(0, Math.min(1, interp.x))) / 2) * 2
+  const cropY = Math.floor(((sourceHeight - cropH) * Math.max(0, Math.min(1, interp.y))) / 2) * 2
 
-    for (let i = 0; i < sorted.length - 1; i++) {
-      const kfA = sorted[i]
-      const kfB = sorted[i + 1]
-      const t0 = kfA.timestamp - trim.start
-      const t1 = kfB.timestamp - trim.start
-
-      const cropW_A = sourceWidth / kfA.scale
-      const cropW_B = sourceWidth / kfB.scale
-      const cropH_A = cropW_A * (outputHeight / outputWidth)
-      const cropH_B = cropW_B * (outputHeight / outputWidth)
-      const cropX_A = kfA.x * (sourceWidth - cropW_A)
-      const cropX_B = kfB.x * (sourceWidth - cropW_B)
-      const cropY_A = kfA.y * (sourceHeight - cropH_A)
-      const cropY_B = kfB.y * (sourceHeight - cropH_B)
-
-      let valA: number, valB: number
-      switch (dim) {
-        case 'w': valA = cropW_A; valB = cropW_B; break
-        case 'h': valA = cropH_A; valB = cropH_B; break
-        case 'x': valA = cropX_A; valB = cropX_B; break
-        case 'y': valA = cropY_A; valB = cropY_B; break
-      }
-
-      const duration = t1 - t0
-      if (duration <= 0 || Math.abs(valA - valB) < 0.001) {
-        segments.push(`if(between(t,${t0.toFixed(3)},${t1.toFixed(3)}),${Math.round(valA)}`)
-      } else {
-        // Linear interpolation in ffmpeg expression (easing baked as linear approximation)
-        const steps = 10
-        let expr = ''
-        for (let s = 0; s < steps; s++) {
-          const sStart = t0 + (duration * s) / steps
-          const sEnd = t0 + (duration * (s + 1)) / steps
-          const pStart = s / steps
-          const pEnd = (s + 1) / steps
-          const easedStart = applyEasing(pStart, kfB.easing)
-          const easedEnd = applyEasing(pEnd, kfB.easing)
-          const vStart = valA + (valB - valA) * easedStart
-          const vEnd = valA + (valB - valA) * easedEnd
-          const slope = (vEnd - vStart) / (sEnd - sStart)
-          const subExpr = `${vStart.toFixed(2)}+${slope.toFixed(4)}*(t-${sStart.toFixed(3)})`
-          if (s === 0) {
-            expr = `if(between(t,${sStart.toFixed(3)},${sEnd.toFixed(3)}),${subExpr}`
-          } else {
-            expr += `,if(between(t,${sStart.toFixed(3)},${sEnd.toFixed(3)}),${subExpr}`
-          }
-        }
-        // Close all if statements and add fallback
-        expr += `,${Math.round(valB)}`
-        for (let s = 0; s < steps; s++) {
-          expr += ')'
-        }
-        segments.push(`if(between(t,${t0.toFixed(3)},${t1.toFixed(3)}),${expr}`)
-      }
-    }
-
-    // Fallback: last keyframe values
-    const lastKf = sorted[sorted.length - 1]
-    const cropW_last = sourceWidth / lastKf.scale
-    const cropH_last = cropW_last * (outputHeight / outputWidth)
-    const cropX_last = lastKf.x * (sourceWidth - cropW_last)
-    const cropY_last = lastKf.y * (sourceHeight - cropH_last)
-
-    let fallback: number
-    switch (dim) {
-      case 'w': fallback = cropW_last; break
-      case 'h': fallback = cropH_last; break
-      case 'x': fallback = cropX_last; break
-      case 'y': fallback = cropY_last; break
-    }
-
-    let result = ''
-    for (let i = 0; i < segments.length; i++) {
-      result += segments[i] + ','
-    }
-    result += Math.round(fallback).toString()
-    for (let i = 0; i < segments.length; i++) {
-      result += ')'
-    }
-
-    return result
-  }
-
-  const wExpr = buildDimExpr('w')
-  const hExpr = buildDimExpr('h')
-  const xExpr = buildDimExpr('x')
-  const yExpr = buildDimExpr('y')
-
-  return `crop=w='${wExpr}':h='${hExpr}':x='${xExpr}':y='${yExpr}',scale=${outputWidth}:${outputHeight}`
+  return `crop=${cropW}:${cropH}:${cropX}:${cropY},scale=${outW}:${outH}`
 }

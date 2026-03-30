@@ -31,6 +31,7 @@ function updateHashRoute(route: Route): void {
 
 interface AppState {
   loaded: boolean
+  basePath: string | null
   projects: ReframeProject[]
   videos: VideoEntry[]
   route: Route
@@ -38,6 +39,9 @@ interface AppState {
   // Init
   init: () => Promise<void>
   persist: () => void
+
+  // Base path
+  setBasePath: (path: string) => void
 
   // Navigation
   navigate: (route: Route) => void
@@ -58,6 +62,7 @@ interface AppState {
 
 export const useAppStore = create<AppState>((set, get) => ({
   loaded: false,
+  basePath: null,
   projects: [],
   videos: [],
   route: { view: 'projects' },
@@ -68,6 +73,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       // Parse URL hash to restore route
       const hashRoute = parseHashRoute(window.location.hash)
       set({
+        basePath: data.basePath || null,
         projects: data.projects || [],
         videos: data.videos || [],
         loaded: true,
@@ -80,9 +86,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   persist: () => {
-    const { projects, videos } = get()
-    const data: AppData = { projects, videos }
+    const { basePath, projects, videos } = get()
+    const data: AppData = { basePath, projects, videos }
     window.electron.saveAppData(data).catch(() => {})
+  },
+
+  setBasePath: (path) => {
+    set({ basePath: path })
+    get().persist()
   },
 
   navigate: (route) => {

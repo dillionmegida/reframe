@@ -46,6 +46,7 @@ export default function ProjectDetail({ projectId }: { projectId: string }) {
               easing: 'linear',
             },
           ],
+          slices: [],
         })
         // Open the editor immediately
         const video = useAppStore.getState().getVideo(videoId)

@@ -1,12 +1,13 @@
 import { create } from 'zustand'
 import { v4 as uuidv4 } from 'uuid'
-import type { Keyframe, VideoEntry, TrimRange } from '../types'
+import type { Keyframe, VideoEntry, TrimRange, Slice, SliceStatus } from '../types'
 
 type Project = VideoEntry
 
 interface UndoSnapshot {
   keyframes: Keyframe[]
   trim: TrimRange
+  slices: Slice[]
 }
 
 interface EditorState {
@@ -14,6 +15,7 @@ interface EditorState {
   currentTime: number
   isPlaying: boolean
   selectedKeyframeId: string | null
+  selectedSliceId: string | null
   past: UndoSnapshot[]
   future: UndoSnapshot[]
 
@@ -32,6 +34,13 @@ interface EditorState {
 
   setOutputRatio: (ratio: Project['outputRatio'], width: number, height: number) => void
 
+  // Slice actions
+  addSlice: (atTime: number) => void
+  selectSlice: (id: string | null) => void
+  updateSlice: (id: string, patch: Partial<Slice>) => void
+  setSliceStatus: (id: string, status: SliceStatus) => void
+  deleteSlice: (id: string) => void
+
   closeProject: () => void
   undo: () => void
   redo: () => void
@@ -45,10 +54,15 @@ function sortKeyframes(kfs: Keyframe[]): Keyframe[] {
   return [...kfs].sort((a, b) => a.timestamp - b.timestamp)
 }
 
-function pushUndo(past: UndoSnapshot[], keyframes: Keyframe[], trim: TrimRange): UndoSnapshot[] {
+function deepCopySlices(slices: Slice[]): Slice[] {
+  return slices.map((s) => ({ ...s }))
+}
+
+function pushUndo(past: UndoSnapshot[], keyframes: Keyframe[], trim: TrimRange, slices: Slice[]): UndoSnapshot[] {
   const snapshot: UndoSnapshot = {
     keyframes: deepCopyKeyframes(keyframes),
     trim: { ...trim },
+    slices: deepCopySlices(slices),
   }
   const newPast = [...past, snapshot]
   if (newPast.length > 50) newPast.shift()
@@ -60,15 +74,19 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   currentTime: 0,
   isPlaying: false,
   selectedKeyframeId: null,
+  selectedSliceId: null,
   past: [],
   future: [],
 
   loadProject: (project) => {
+    // Ensure slices array exists for legacy data
+    const p = { ...project, slices: project.slices || [] }
     set({
-      project,
-      currentTime: project.trim.start,
+      project: p,
+      currentTime: p.trim.start,
       isPlaying: false,
       selectedKeyframeId: null,
+      selectedSliceId: null,
       past: [],
       future: [],
     })
@@ -89,7 +107,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const { project, past } = get()
     if (!project) return
 
-    const newPast = pushUndo(past, project.keyframes, project.trim)
+    const newPast = pushUndo(past, project.keyframes, project.trim, project.slices)
     const easing = kf.easing ?? 'ease-in'
     const existing = project.keyframes.find(
       (k) => Math.abs(k.timestamp - kf.timestamp) < 0.1
@@ -123,7 +141,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const { project, past } = get()
     if (!project) return
 
-    const newPast = pushUndo(past, project.keyframes, project.trim)
+    const newPast = pushUndo(past, project.keyframes, project.trim, project.slices)
     const newKeyframes = project.keyframes.map((k) =>
       k.id === id ? { ...k, ...patch } : k
     )
@@ -142,7 +160,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const { project, past, selectedKeyframeId } = get()
     if (!project) return
 
-    const newPast = pushUndo(past, project.keyframes, project.trim)
+    const newPast = pushUndo(past, project.keyframes, project.trim, project.slices)
     const newKeyframes = project.keyframes.filter((k) => k.id !== id)
 
     set({
@@ -172,7 +190,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     let newTimestamp = sorted[idx].timestamp - offsetSeconds
     newTimestamp = Math.max(newTimestamp, project.trim.start, 0)
 
-    const newPast = pushUndo(past, project.keyframes, project.trim)
+    const newPast = pushUndo(past, project.keyframes, project.trim, project.slices)
     const existing = project.keyframes.find(
       (k) => Math.abs(k.timestamp - newTimestamp) < 0.1
     )
@@ -213,7 +231,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (!project) return
 
     const clamped = Math.max(0, Math.min(t, project.trim.end - 0.5))
-    const newPast = pushUndo(past, project.keyframes, project.trim)
+    const newPast = pushUndo(past, project.keyframes, project.trim, project.slices)
     const newKeyframes = project.keyframes.filter((k) => k.timestamp >= clamped)
     const newCurrentTime = currentTime < clamped ? clamped : currentTime
 
@@ -234,7 +252,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (!project) return
 
     const clamped = Math.max(project.trim.start + 0.5, Math.min(t, project.videoDuration))
-    const newPast = pushUndo(past, project.keyframes, project.trim)
+    const newPast = pushUndo(past, project.keyframes, project.trim, project.slices)
     const newKeyframes = project.keyframes.filter((k) => k.timestamp <= clamped)
     const newCurrentTime = currentTime > clamped ? clamped : currentTime
 
@@ -263,12 +281,93 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     })
   },
 
+  // Slice actions
+  addSlice: (atTime) => {
+    const { project, past } = get()
+    if (!project) return
+
+    const newPast = pushUndo(past, project.keyframes, project.trim, project.slices)
+    const sliceDuration = 5
+    // Default slice starts at the playhead
+    let start = Math.max(project.trim.start, Math.min(atTime, project.trim.end))
+    let end = Math.min(project.trim.end, start + sliceDuration)
+    if (end <= start) {
+      // If we're at the very end, keep a minimal positive duration
+      start = Math.max(project.trim.start, project.trim.end - 0.1)
+      end = project.trim.end
+    }
+
+    const newSlice: Slice = {
+      id: uuidv4(),
+      start,
+      end,
+      status: 'keep',
+    }
+
+    set({
+      project: {
+        ...project,
+        slices: [...project.slices, newSlice].sort((a, b) => a.start - b.start),
+      },
+      selectedSliceId: newSlice.id,
+      past: newPast,
+      future: [],
+    })
+  },
+
+  selectSlice: (id) => set({ selectedSliceId: id }),
+
+  updateSlice: (id, patch) => {
+    const { project, past } = get()
+    if (!project) return
+
+    const newPast = pushUndo(past, project.keyframes, project.trim, project.slices)
+    const newSlices = project.slices.map((s) =>
+      s.id === id ? { ...s, ...patch } : s
+    ).sort((a, b) => a.start - b.start)
+
+    set({
+      project: { ...project, slices: newSlices },
+      past: newPast,
+      future: [],
+    })
+  },
+
+  setSliceStatus: (id, status) => {
+    const { project } = get()
+    if (!project) return
+
+    const newSlices = project.slices.map((s) =>
+      s.id === id ? { ...s, status } : s
+    )
+
+    set({
+      project: { ...project, slices: newSlices },
+    })
+  },
+
+  deleteSlice: (id) => {
+    const { project, past, selectedSliceId } = get()
+    if (!project) return
+
+    const newPast = pushUndo(past, project.keyframes, project.trim, project.slices)
+    const newSlices = project.slices.filter((s) => s.id !== id)
+
+    set({
+      project: { ...project, slices: newSlices },
+      past: newPast,
+      future: [],
+      selectedSliceId: selectedSliceId === id ? null : selectedSliceId,
+    })
+  },
+
   closeProject: () => {
     set({
       project: null,
       currentTime: 0,
       isPlaying: false,
       selectedKeyframeId: null,
+      selectedSliceId: null,
       past: [],
       future: [],
     })
@@ -284,6 +383,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const currentSnapshot: UndoSnapshot = {
       keyframes: deepCopyKeyframes(project.keyframes),
       trim: { ...project.trim },
+      slices: deepCopySlices(project.slices),
     }
 
     set({
@@ -291,6 +391,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         ...project,
         keyframes: snapshot.keyframes,
         trim: snapshot.trim,
+        slices: snapshot.slices,
       },
       past: newPast,
       future: [...future, currentSnapshot],
@@ -307,6 +408,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const currentSnapshot: UndoSnapshot = {
       keyframes: deepCopyKeyframes(project.keyframes),
       trim: { ...project.trim },
+      slices: deepCopySlices(project.slices),
     }
 
     set({
@@ -314,6 +416,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         ...project,
         keyframes: snapshot.keyframes,
         trim: snapshot.trim,
+        slices: snapshot.slices,
       },
       past: [...past, currentSnapshot],
       future: newFuture,

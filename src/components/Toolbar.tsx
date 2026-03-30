@@ -26,13 +26,20 @@ export default function Toolbar() {
   const closeProject = useEditorStore((s) => s.closeProject)
   const navigate = useAppStore((s) => s.navigate)
   const route = useAppStore((s) => s.route)
+  const basePath = useAppStore((s) => s.basePath)
+  const getProject = useAppStore((s) => s.getProject)
 
   const [showExportModal, setShowExportModal] = useState(false)
   const [exportProgress, setExportProgress] = useState<number | null>(null)
   const [exportDone, setExportDone] = useState<string | null>(null)
   const [exportError, setExportError] = useState<string | null>(null)
 
+  const exportableSlices = (project.slices || []).filter((s) => s.status === 'keep')
+  const hasExportableSlices = exportableSlices.length > 0
+
   const handleExport = async () => {
+    if (!hasExportableSlices) return
+
     setShowExportModal(true)
     setExportProgress(0)
     setExportDone(null)
@@ -47,7 +54,17 @@ export default function Toolbar() {
     })
 
     try {
-      const result = await window.electron.exportVideo({ project })
+      // Get project name for export path
+      const reframeProject = route.view === 'editor' ? getProject(route.projectId) : null
+      const projectName = reframeProject?.name || 'unknown-project'
+      
+      const result = await window.electron.exportVideo({ 
+        project, 
+        slices: exportableSlices,
+        basePath,
+        projectName,
+        videoId: project.id,
+      })
       if (!result) {
         setShowExportModal(false)
       }
@@ -143,11 +160,18 @@ export default function Toolbar() {
 
         {/* Export button */}
         <button
-          className="px-4 py-1.5 text-xs font-medium rounded bg-accent text-black hover:bg-accent/90 transition-colors"
+          className={`px-4 py-1.5 text-xs font-medium rounded transition-colors ${
+            hasExportableSlices
+              ? 'bg-accent text-black hover:bg-accent/90'
+              : 'bg-white/5 text-text-muted/40 cursor-not-allowed'
+          }`}
           onClick={handleExport}
+          disabled={!hasExportableSlices}
           style={{ WebkitAppRegion: 'no-drag' } as any}
         >
-          Export
+          {hasExportableSlices
+            ? `Export ${exportableSlices.length} Slice${exportableSlices.length !== 1 ? 's' : ''}`
+            : 'Export'}
         </button>
       </div>
 

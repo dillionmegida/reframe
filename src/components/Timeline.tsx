@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import { useEditorStore } from '../store/editorStore'
+import type { SliceStatus } from '../types'
 import Playback from './Playback'
 import KeyframeInspector from './KeyframeInspector'
 
@@ -20,6 +21,11 @@ export default function Timeline() {
   const cloneKeyframeMinus = useEditorStore((s) => s.cloneKeyframeMinus)
   const setTrimStart = useEditorStore((s) => s.setTrimStart)
   const setTrimEnd = useEditorStore((s) => s.setTrimEnd)
+  const selectedSliceId = useEditorStore((s) => s.selectedSliceId)
+  const selectSlice = useEditorStore((s) => s.selectSlice)
+  const updateSlice = useEditorStore((s) => s.updateSlice)
+  const setSliceStatus = useEditorStore((s) => s.setSliceStatus)
+  const deleteSlice = useEditorStore((s) => s.deleteSlice)
 
   const filmstripRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -150,6 +156,8 @@ export default function Timeline() {
       const rect = sc.getBoundingClientRect()
       const t = xToTime(e.clientX - rect.left + sc.scrollLeft)
       setCurrentTime(t)
+      // Deselect slice when clicking on empty timeline area
+      selectSlice(null)
 
       const onMouseMove = (ev: MouseEvent) => {
         const newT = xToTime(ev.clientX - rect.left + sc.scrollLeft)
@@ -162,7 +170,61 @@ export default function Timeline() {
       document.addEventListener('mousemove', onMouseMove)
       document.addEventListener('mouseup', onMouseUp)
     },
-    [xToTime, setCurrentTime, duration]
+    [xToTime, setCurrentTime, selectSlice, duration]
+  )
+
+  // Slice handle drag
+  const handleSliceHandleDrag = useCallback(
+    (e: React.MouseEvent, sliceId: string, which: 'start' | 'end') => {
+      e.stopPropagation()
+      selectSlice(sliceId)
+
+      // If dragging the left handle, also move playhead to slice start
+      if (which === 'start') {
+        const slice = project.slices.find((s) => s.id === sliceId)
+        if (slice) setCurrentTime(slice.start)
+      }
+
+      const sc = scrollContainerRef.current
+      if (!sc) return
+      const rect = sc.getBoundingClientRect()
+
+      const onMouseMove = (ev: MouseEvent) => {
+        const newT = xToTime(ev.clientX - rect.left + sc.scrollLeft)
+        const clamped = Math.max(trim.start, Math.min(trim.end, newT))
+        const slice = useEditorStore.getState().project?.slices.find((s) => s.id === sliceId)
+        if (!slice) return
+        if (which === 'start') {
+          const newStart = Math.min(clamped, slice.end - 0.5)
+          updateSlice(sliceId, { start: newStart })
+          setCurrentTime(newStart)
+        } else {
+          const newEnd = Math.max(clamped, slice.start + 0.5)
+          updateSlice(sliceId, { end: newEnd })
+        }
+      }
+      const onMouseUp = () => {
+        document.removeEventListener('mousemove', onMouseMove)
+        document.removeEventListener('mouseup', onMouseUp)
+      }
+      document.addEventListener('mousemove', onMouseMove)
+      document.addEventListener('mouseup', onMouseUp)
+    },
+    [xToTime, trim, selectSlice, updateSlice, setCurrentTime, project.slices]
+  )
+
+  // Click inside a slice — select it but still move playhead
+  const handleSliceClick = useCallback(
+    (e: React.MouseEvent, sliceId: string) => {
+      e.stopPropagation()
+      selectSlice(sliceId)
+      const sc = scrollContainerRef.current
+      if (!sc) return
+      const rect = sc.getBoundingClientRect()
+      const t = xToTime(e.clientX - rect.left + sc.scrollLeft)
+      setCurrentTime(t)
+    },
+    [xToTime, selectSlice, setCurrentTime]
   )
 
   // Keyframe drag
@@ -332,6 +394,92 @@ export default function Timeline() {
             >
               <div className="w-[2px] h-4 bg-white/60 rounded-full" />
             </div>
+
+            {/* Slice markers */}
+            {project.slices.map((slice) => {
+              const leftPx = timeToX(slice.start)
+              const widthPx = timeToX(slice.end) - leftPx
+              const isSelected = selectedSliceId === slice.id
+              const isHidden = slice.status === 'hidden'
+
+              return (
+                <div key={slice.id} className="absolute top-0 h-full z-15" style={{ left: leftPx, width: widthPx }}>
+                  {/* Slice background */}
+                  <div
+                    className="absolute inset-0 cursor-pointer"
+                    style={{
+                      background: isHidden ? 'rgba(255,255,255,0.05)' : 'rgba(74,222,128,0.15)',
+                      borderTop: isSelected ? '2px solid rgba(74,222,128,0.8)' : '2px solid rgba(74,222,128,0.3)',
+                      borderBottom: isSelected ? '2px solid rgba(74,222,128,0.8)' : '2px solid rgba(74,222,128,0.3)',
+                      opacity: isHidden ? 0.5 : 1,
+                    }}
+                    onMouseDown={(e) => handleSliceClick(e, slice.id)}
+                  />
+
+                  {/* Left handle */}
+                  <div
+                    className="absolute top-0 h-full w-[8px] cursor-ew-resize z-30 flex items-center justify-center"
+                    style={{ left: -4, background: isSelected ? 'rgba(74,222,128,0.6)' : 'rgba(74,222,128,0.3)' }}
+                    onMouseDown={(e) => handleSliceHandleDrag(e, slice.id, 'start')}
+                  >
+                    <div className="w-[2px] h-4 bg-white/60 rounded-full" />
+                  </div>
+
+                  {/* Right handle */}
+                  <div
+                    className="absolute top-0 h-full w-[8px] cursor-ew-resize z-30 flex items-center justify-center"
+                    style={{ right: -4, background: isSelected ? 'rgba(74,222,128,0.6)' : 'rgba(74,222,128,0.3)' }}
+                    onMouseDown={(e) => handleSliceHandleDrag(e, slice.id, 'end')}
+                  >
+                    <div className="w-[2px] h-4 bg-white/60 rounded-full" />
+                  </div>
+
+                  {/* Slice action popup */}
+                  {isSelected && (
+                    <div
+                      className="absolute flex items-center gap-1 px-1 py-0.5 rounded-md bg-panel border border-border shadow-lg z-80"
+                      style={{ bottom: -32, left: '50%', transform: 'translateX(-50%)', whiteSpace: 'nowrap' }}
+                      onMouseDown={(e) => e.stopPropagation()}
+                    >
+                      {(['keep', 'hidden'] as SliceStatus[]).map((status) => (
+                        <button
+                          key={status}
+                          className={`px-2 py-0.5 text-[10px] rounded transition-colors ${
+                            slice.status === status
+                              ? 'bg-accent text-black font-medium'
+                              : 'text-text-muted hover:text-text-primary hover:bg-white/10'
+                          }`}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setSliceStatus(slice.id, status)
+                          }}
+                        >
+                          {status === 'keep' ? 'Keep' : 'Hide'}
+                        </button>
+                      ))}
+                      <button
+                        className="px-2 py-0.5 text-[10px] rounded text-red-400 hover:bg-white/10 transition-colors"
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          deleteSlice(slice.id)
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Hidden indicator */}
+                  {isHidden && (
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <span className="text-[9px] text-text-muted/60 font-mono">hidden</span>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
 
             {/* Keyframe markers */}
             {project.keyframes.map((kf) => {

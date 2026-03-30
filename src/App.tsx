@@ -4,9 +4,11 @@ import { useEditorStore } from './store/editorStore'
 import Sidebar from './components/Sidebar'
 import ProjectDetail from './screens/ProjectDetail'
 import EditorScreen from './screens/EditorScreen'
+import BasePathSetup from './screens/BasePathSetup'
 
 export default function App() {
   const loaded = useAppStore((s) => s.loaded)
+  const basePath = useAppStore((s) => s.basePath)
   const route = useAppStore((s) => s.route)
   const init = useAppStore((s) => s.init)
   const editorProject = useEditorStore((s) => s.project)
@@ -34,6 +36,11 @@ export default function App() {
         <span className="text-text-muted text-sm">Loading...</span>
       </div>
     )
+  }
+
+  // Show base path setup if not configured
+  if (!basePath) {
+    return <BasePathSetup />
   }
 
   // Editor view is full-width (no sidebar) for maximum workspace

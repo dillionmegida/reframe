@@ -13,6 +13,9 @@ interface ElectronAPI {
   onExportProgress: (cb: (pct: number) => void) => void
   onExportDone: (cb: (path: string) => void) => void
   showInFolder: (path: string) => void
+  selectDirectory: () => Promise<string | null>
+  ensureDirectory: (path: string) => Promise<void>
+  removeDirectory: (path: string) => Promise<void>
 }
 
 declare global {

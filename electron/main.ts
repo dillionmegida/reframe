@@ -39,9 +39,16 @@ function getDataPath(): string {
 function loadAppData(): any {
   const p = getDataPath()
   if (fs.existsSync(p)) {
-    try { return JSON.parse(fs.readFileSync(p, 'utf-8')) } catch { /* corrupt */ }
+    try {
+      const data = JSON.parse(fs.readFileSync(p, 'utf-8'))
+      // Ensure basePath exists for legacy data
+      if (!data.hasOwnProperty('basePath')) {
+        data.basePath = null
+      }
+      return data
+    } catch { /* corrupt */ }
   }
-  return { projects: [], videos: [] }
+  return { basePath: null, projects: [], videos: [] }
 }
 
 function saveAppData(data: any): void {
@@ -145,15 +152,44 @@ ipcMain.handle('get-video-metadata', async (_event, filePath: string) => {
 })
 
 ipcMain.handle('export-video', async (_event, args) => {
-  if (!mainWindow) return
-  const result = await dialog.showSaveDialog(mainWindow, {
-    defaultPath: 'reframe-export.mp4',
-    filters: [{ name: 'MP4 Video', extensions: ['mp4'] }],
-  })
-  if (result.canceled || !result.filePath) return null
+  if (!mainWindow) return null
+  
+  const { basePath, projectName, videoId, slices } = args
+  
+  // If no basePath, fall back to old behavior (ask user)
+  if (!basePath) {
+    const sliceCount = slices?.length || 0
+    const defaultName = sliceCount > 1 ? 'reframe-export.mp4' : 'reframe-export.mp4'
+    const result = await dialog.showSaveDialog(mainWindow, {
+      defaultPath: defaultName,
+      filters: [{ name: 'MP4 Video', extensions: ['mp4'] }],
+    })
+    if (result.canceled || !result.filePath) return null
+    try {
+      const paths = await exportVideo(args, result.filePath, mainWindow)
+      return paths.join(', ')
+    } catch (err: any) {
+      throw new Error(err.message || 'Export failed')
+    }
+  }
+  
+  // Auto-generate export path: basePath/projectName/exports/
+  const sanitizeName = (name: string) => name.replace(/[^a-zA-Z0-9-_]/g, '-')
+  const projectDir = path.join(basePath, sanitizeName(projectName))
+  const exportsDir = path.join(projectDir, 'exports')
+  
   try {
-    await exportVideo(args, result.filePath, mainWindow)
-    return result.filePath
+    // Clear exports directory before export
+    if (fs.existsSync(exportsDir)) {
+      fs.rmSync(exportsDir, { recursive: true, force: true })
+    }
+    fs.mkdirSync(exportsDir, { recursive: true })
+    
+    // Generate filename: video-id_slice-1.mp4, video-id_slice-2.mp4, etc.
+    const baseFileName = path.join(exportsDir, sanitizeName(videoId))
+    
+    const paths = await exportVideo(args, baseFileName + '.mp4', mainWindow)
+    return paths.join(', ')
   } catch (err: any) {
     throw new Error(err.message || 'Export failed')
   }
@@ -161,4 +197,25 @@ ipcMain.handle('export-video', async (_event, args) => {
 
 ipcMain.handle('show-in-folder', (_event, filePath: string) => {
   shell.showItemInFolder(filePath)
+})
+
+ipcMain.handle('select-directory', async () => {
+  if (!mainWindow) return null
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory', 'createDirectory'],
+  })
+  if (result.canceled || result.filePaths.length === 0) return null
+  return result.filePaths[0]
+})
+
+ipcMain.handle('ensure-directory', async (_event, dirPath: string) => {
+  if (!fs.existsSync(dirPath)) {
+    fs.mkdirSync(dirPath, { recursive: true })
+  }
+})
+
+ipcMain.handle('remove-directory', async (_event, dirPath: string) => {
+  if (fs.existsSync(dirPath)) {
+    fs.rmSync(dirPath, { recursive: true, force: true })
+  }
 })
