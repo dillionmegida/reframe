@@ -4,6 +4,30 @@ import type { Keyframe, VideoEntry, TrimRange, Slice, SliceStatus } from '../typ
 
 type Project = VideoEntry
 
+const PLAYHEAD_STORAGE_PREFIX = 'reframe.playhead.'
+
+function readStoredPlayhead(videoId: string, trimStart: number, trimEnd: number): number {
+  if (typeof window === 'undefined') return trimStart
+  try {
+    const raw = window.localStorage.getItem(PLAYHEAD_STORAGE_PREFIX + videoId)
+    if (!raw) return trimStart
+    const parsed = parseFloat(raw)
+    if (!Number.isFinite(parsed)) return trimStart
+    return Math.max(trimStart, Math.min(trimEnd, parsed))
+  } catch {
+    return trimStart
+  }
+}
+
+function writeStoredPlayhead(videoId: string, t: number): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(PLAYHEAD_STORAGE_PREFIX + videoId, t.toString())
+  } catch {
+    // ignore storage errors
+  }
+}
+
 interface UndoSnapshot {
   keyframes: Keyframe[]
   trim: TrimRange
@@ -81,9 +105,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   loadProject: (project) => {
     // Ensure slices array exists for legacy data
     const p = { ...project, slices: project.slices || [] }
+    const storedPlayhead = readStoredPlayhead(p.id, p.trim.start, p.trim.end)
     set({
       project: p,
-      currentTime: p.trim.start,
+      currentTime: storedPlayhead,
       isPlaying: false,
       selectedKeyframeId: null,
       selectedSliceId: null,
@@ -96,6 +121,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const { project } = get()
     if (!project) return
     const clamped = Math.max(project.trim.start, Math.min(project.trim.end, t))
+    writeStoredPlayhead(project.id, clamped)
     set({ currentTime: clamped })
   },
 
@@ -245,6 +271,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       past: newPast,
       future: [],
     })
+    writeStoredPlayhead(project.id, newCurrentTime)
   },
 
   setTrimEnd: (t) => {
@@ -266,6 +293,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       past: newPast,
       future: [],
     })
+    writeStoredPlayhead(project.id, newCurrentTime)
   },
 
   setOutputRatio: (ratio, width, height) => {

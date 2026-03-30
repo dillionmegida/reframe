@@ -25,6 +25,7 @@ const CropOverlay = styled.div<{
   $isDragging: boolean
   $isPlaying: boolean
   $isResizing: boolean
+  $disableTransition: boolean
 }>`
   position: absolute;
   left: ${({ $left }) => `${$left}px`};
@@ -36,8 +37,8 @@ const CropOverlay = styled.div<{
   cursor: ${({ $isDragging }) => ($isDragging ? 'grabbing' : 'grab')};
   z-index: 10;
   pointer-events: auto;
-  transition: ${({ $isDragging, $isPlaying, $isResizing }) =>
-    $isDragging || $isPlaying || $isResizing
+  transition: ${({ $isDragging, $isPlaying, $isResizing, $disableTransition }) =>
+    $disableTransition || $isDragging || $isPlaying || $isResizing
       ? 'none'
       : 'left 0.15s ease-out, top 0.15s ease-out, width 0.15s ease-out, height 0.15s ease-out'};
   will-change: left, top, width, height;
@@ -109,6 +110,7 @@ export default function SourcePanel() {
   const containerRef = useRef<HTMLDivElement>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [isResizing, setIsResizing] = useState(false)
+  const [disableTransition, setDisableTransition] = useState(true)
   const [videoRendered, setVideoRendered] = useState({ x: 0, y: 0, w: 0, h: 0 })
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -153,6 +155,15 @@ export default function SourcePanel() {
     window.addEventListener('resize', updateVideoRendered)
     return () => window.removeEventListener('resize', updateVideoRendered)
   }, [updateVideoRendered])
+
+  // Disable the crop overlay transition on first mount so it doesn't jump from (0,0)
+  useEffect(() => {
+    if (!disableTransition) return
+    if (videoRendered.w === 0 || videoRendered.h === 0) return
+
+    const id = requestAnimationFrame(() => setDisableTransition(false))
+    return () => cancelAnimationFrame(id)
+  }, [disableTransition, videoRendered])
 
   // Sync video element with store
   useEffect(() => {
@@ -437,6 +448,7 @@ export default function SourcePanel() {
         $isDragging={isDragging}
         $isPlaying={isPlaying}
         $isResizing={isResizing}
+        $disableTransition={disableTransition}
         onMouseDown={handleMouseDown}
       />
 

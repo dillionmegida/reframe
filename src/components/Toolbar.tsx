@@ -233,8 +233,13 @@ export default function Toolbar() {
   const getProject = useAppStore((s) => s.getProject)
 
   const [showExportModal, setShowExportModal] = useState(false)
-  const [exportProgress, setExportProgress] = useState<number | null>(null)
-  const [exportDone, setExportDone] = useState<string | null>(null)
+  const [sliceProgress, setSliceProgress] = useState<Record<string, {
+    progress: number
+    state: 'progress' | 'done' | 'error'
+    path?: string
+    error?: string
+  }>>({})
+  const [exportComplete, setExportComplete] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
 
   const exportableSlices = (project.slices || []).filter((s) => s.status === 'keep')
@@ -244,16 +249,57 @@ export default function Toolbar() {
     if (!hasExportableSlices) return
 
     setShowExportModal(true)
-    setExportProgress(0)
-    setExportDone(null)
+    setExportComplete(false)
     setExportError(null)
+    setSliceProgress(
+      Object.fromEntries(
+        exportableSlices.map((s) => [s.id, { progress: 0, state: 'progress' as const }])
+      )
+    )
 
-    window.electron.onExportProgress((pct: number) => {
-      setExportProgress(pct)
+    window.electron.onExportProgress((payload: any) => {
+      if (!payload || typeof payload !== 'object') return
+      const { sliceId, progress, state, path, error } = payload as {
+        sliceId?: string
+        progress?: number
+        state?: 'progress' | 'done' | 'error'
+        path?: string
+        error?: string
+      }
+      if (!sliceId) return
+
+      setSliceProgress((prev) => {
+        const existing = prev[sliceId] || { progress: 0, state: 'progress' as const }
+        return {
+          ...prev,
+          [sliceId]: {
+            ...existing,
+            progress: typeof progress === 'number' ? progress : existing.progress,
+            state: state || existing.state,
+            path: path || existing.path,
+            error: error || existing.error,
+          },
+        }
+      })
     })
-    window.electron.onExportDone((path: string) => {
-      setExportDone(path)
-      setExportProgress(null)
+
+    window.electron.onExportDone((payload: any) => {
+      setExportComplete(true)
+
+      const results: { sliceId: string; path: string }[] = Array.isArray(payload?.results)
+        ? payload.results
+        : []
+
+      if (results.length === 0) return
+
+      setSliceProgress((prev) => {
+        const next = { ...prev }
+        results.forEach(({ sliceId, path }) => {
+          const existing = next[sliceId] || { progress: 0, state: 'progress' as const }
+          next[sliceId] = { ...existing, progress: 100, state: 'done', path }
+        })
+        return next
+      })
     })
 
     try {
@@ -272,7 +318,6 @@ export default function Toolbar() {
       }
     } catch (err: any) {
       setExportError(err.message || 'Export failed')
-      setExportProgress(null)
     }
   }
 
@@ -343,30 +388,57 @@ export default function Toolbar() {
         <ModalBackdrop>
           <Modal>
             <ModalTitle>
-              {exportDone ? 'Export Complete' : exportError ? 'Export Failed' : 'Exporting...'}
+              {exportComplete ? 'Export Complete' : exportError ? 'Export Failed' : 'Exporting...'}
             </ModalTitle>
 
-            {exportProgress !== null && (
-              <>
-                <ProgressTrack>
-                  <ProgressFill $pct={exportProgress} />
-                </ProgressTrack>
-                <MonoText>{Math.round(exportProgress)}%</MonoText>
-              </>
-            )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              {exportableSlices.map((slice, idx) => {
+                const state = sliceProgress[slice.id]
+                const pct = Math.round(state?.progress ?? 0)
+                const isDone = state?.state === 'done'
+                const isError = state?.state === 'error'
+
+                return (
+                  <div
+                    key={slice.id}
+                    style={{
+                      padding: '0.75rem 0.75rem 0.5rem',
+                      border: '1px solid #2a2a2a',
+                      borderRadius: '0.5rem',
+                      background: 'rgba(255, 255, 255, 0.02)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.35rem',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <MonoText style={{ color: '#e5e5e5' }}>Slice {idx + 1}</MonoText>
+                      <MonoText style={{ color: isDone ? '#10b981' : isError ? '#f87171' : '#6b7280' }}>
+                        {isDone ? 'Completed' : isError ? 'Failed' : `${pct}%`}
+                      </MonoText>
+                    </div>
+
+                    {!isDone && !isError && (
+                      <ProgressTrack>
+                        <ProgressFill $pct={pct} />
+                      </ProgressTrack>
+                    )}
+
+                    {isDone && state?.path && (
+                      <PrimaryGhost onClick={() => window.electron.showInFolder(state.path!)}>
+                        Show file
+                      </PrimaryGhost>
+                    )}
+
+                    {isError && state?.error && <ErrorText>{state.error}</ErrorText>}
+                  </div>
+                )
+              })}
+            </div>
 
             {exportError && <ErrorText>{exportError}</ErrorText>}
 
-            {exportDone && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <MonoText style={{ color: '#6b7280', wordBreak: 'break-all' }}>{exportDone}</MonoText>
-                <PrimaryGhost onClick={() => window.electron.showInFolder(exportDone!)}>
-                  Show in Finder
-                </PrimaryGhost>
-              </div>
-            )}
-
-            {(exportDone || exportError) && (
+            {(exportComplete || exportError) && (
               <SecondaryGhost onClick={() => setShowExportModal(false)}>Close</SecondaryGhost>
             )}
           </Modal>

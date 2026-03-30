@@ -19,11 +19,11 @@ contextBridge.exposeInMainWorld('electron', {
   respondCapture: (channel: string, data: any) => ipcRenderer.send(channel, data),
   respondCaptureProgress: (channel: string, data: any) => ipcRenderer.send(channel, data),
   saveTempBlob: (data: Uint8Array, ext: string) => ipcRenderer.invoke('save-temp-blob', data, ext),
-  onExportProgress: (cb: (pct: number) => void) => {
-    ipcRenderer.on('export:progress', (_: any, pct: number) => cb(pct))
+  onExportProgress: (cb: (payload: any) => void) => {
+    ipcRenderer.on('export:progress', (_: any, payload: any) => cb(payload))
   },
-  onExportDone: (cb: (path: string) => void) => {
-    ipcRenderer.on('export:done', (_: any, p: string) => cb(p))
+  onExportDone: (cb: (payload: any) => void) => {
+    ipcRenderer.on('export:done', (_: any, payload: any) => cb(payload))
   },
   showInFolder: (path: string) => ipcRenderer.invoke('show-in-folder', path),
 

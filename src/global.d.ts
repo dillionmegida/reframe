@@ -10,8 +10,8 @@ interface ElectronAPI {
     fps: number
   }>
   exportVideo: (args: any) => Promise<string | null>
-  onExportProgress: (cb: (pct: number) => void) => void
-  onExportDone: (cb: (path: string) => void) => void
+  onExportProgress: (cb: (payload: any) => void) => void
+  onExportDone: (cb: (payload: any) => void) => void
   showInFolder: (path: string) => void
   selectDirectory: () => Promise<string | null>
   ensureDirectory: (path: string) => Promise<void>

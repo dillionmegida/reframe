@@ -97,6 +97,15 @@ interface Segment {
   hasZoomChange: boolean
 }
 
+// Emit per-slice progress updates to renderer
+function sendSliceProgress(
+  mainWindow: BrowserWindow,
+  payload: { sliceId: string; progress: number; state?: 'progress' | 'done' | 'error'; path?: string; error?: string }
+) {
+  const clamped = Math.max(0, Math.min(100, payload.progress))
+  mainWindow.webContents.send('export:progress', { ...payload, progress: clamped })
+}
+
 // Request renderer to capture preview for a slice; returns video file path
 function requestPreviewCapture(
   mainWindow: BrowserWindow,
@@ -153,8 +162,7 @@ async function exportSegmentSlow(
   keyframes: Keyframe[],
   _tempDir: string,
   mainWindow: BrowserWindow,
-  progressOffset: number,
-  progressScale: number
+  sliceId: string
 ): Promise<void> {
   const duration = segment.end - segment.start
   const fps = 30
@@ -170,7 +178,7 @@ async function exportSegmentSlow(
     videoWidth: project.videoWidth,
     videoHeight: project.videoHeight,
   }, (pct) => {
-    mainWindow.webContents.send('export:progress', progressOffset + pct * progressScale * 0.9)
+    sendSliceProgress(mainWindow, { sliceId, progress: pct * 0.9 })
   })
 
   // Mux captured video with source audio slice
@@ -194,7 +202,7 @@ async function exportSegmentSlow(
       .output(outputPath)
       .on('end', () => {
         // Final bump to near completion; caller will send 100%
-        mainWindow.webContents.send('export:progress', progressOffset + 95 * progressScale)
+        sendSliceProgress(mainWindow, { sliceId, progress: 95 })
         resolve()
       })
       .on('error', (err: Error) => reject(err))
@@ -241,9 +249,7 @@ async function exportSingleSlice(
   project: Project,
   slice: Slice,
   outputPath: string,
-  mainWindow: BrowserWindow,
-  progressOffset: number,
-  progressScale: number
+  mainWindow: BrowserWindow
 ): Promise<void> {
   const activeKeyframes = buildSliceKeyframes(project.keyframes, slice.start, slice.end)
 
@@ -252,6 +258,8 @@ async function exportSingleSlice(
   fs.mkdirSync(tempDir, { recursive: true })
 
   try {
+    sendSliceProgress(mainWindow, { sliceId: slice.id, progress: 0, state: 'progress' })
+
     await exportSegmentSlow(
       project,
       { start: slice.start, end: slice.end, hasZoomChange: true },
@@ -259,10 +267,10 @@ async function exportSingleSlice(
       activeKeyframes,
       tempDir,
       mainWindow,
-      progressOffset,
-      progressScale
+      slice.id
     )
-    mainWindow.webContents.send('export:progress', progressOffset + 100 * progressScale)
+
+    sendSliceProgress(mainWindow, { sliceId: slice.id, progress: 100, state: 'done', path: outputPath })
   } finally {
     if (fs.existsSync(tempDir)) {
       fs.rmSync(tempDir, { recursive: true, force: true })
@@ -278,6 +286,8 @@ export async function exportVideo(
   const { project, slices } = args
   const exportSlices = slices && slices.length > 0 ? slices : undefined
 
+  const results: { sliceId: string; path: string }[] = []
+
   // No slices: export full trim range
   if (!exportSlices) {
     const slice: Slice = {
@@ -287,32 +297,38 @@ export async function exportVideo(
       status: 'keep',
     }
 
-    await exportSingleSlice(project, slice, outputDir, mainWindow, 0, 1)
-    mainWindow.webContents.send('export:done', outputDir)
+    await exportSingleSlice(project, slice, outputDir, mainWindow)
+    results.push({ sliceId: slice.id, path: outputDir })
+    mainWindow.webContents.send('export:done', { paths: [outputDir], results })
     return [outputDir]
   }
 
   // Multi-slice export
   const outputPaths: string[] = []
   const total = exportSlices.length
+  const CONCURRENCY = 3
+  let index = 0
 
-  for (let i = 0; i < total; i++) {
-    const slice = exportSlices[i]
-    const baseName = outputDir.replace(/\.[^.]+$/, '')
-    const slicePath = total === 1 ? outputDir : `${baseName}_slice-${i + 1}.mp4`
+  const worker = async () => {
+    while (true) {
+      const currentIndex = index
+      if (currentIndex >= total) break
+      index += 1
 
-    await exportSingleSlice(
-      project,
-      slice,
-      slicePath,
-      mainWindow,
-      (i / total) * 100,
-      1 / total
-    )
+      const slice = exportSlices[currentIndex]
+      const baseName = outputDir.replace(/\.[^.]+$/, '')
+      const slicePath = total === 1 ? outputDir : `${baseName}_slice-${currentIndex + 1}.mp4`
 
-    outputPaths.push(slicePath)
+      await exportSingleSlice(project, slice, slicePath, mainWindow)
+
+      outputPaths[currentIndex] = slicePath
+      results.push({ sliceId: slice.id, path: slicePath })
+    }
   }
 
-  mainWindow.webContents.send('export:done', outputPaths.join(', '))
+  const workers = Array.from({ length: Math.min(CONCURRENCY, total) }, () => worker())
+  await Promise.all(workers)
+
+  mainWindow.webContents.send('export:done', { paths: outputPaths, results })
   return outputPaths
 }
