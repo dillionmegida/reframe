@@ -314,7 +314,7 @@ export default function Timeline() {
       {/* Scrollable timeline area */}
       <div
         ref={scrollContainerRef}
-        className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden relative"
+        className="mx-6 flex-1 min-h-0 overflow-x-auto overflow-y-hidden relative"
         onMouseDown={handleFilmstripMouseDown}
         style={{ cursor: 'pointer' }}
       >
@@ -531,7 +531,7 @@ export default function Timeline() {
       </div>
 
       {/* Playback controls + zoom slider */}
-      <div className="flex-shrink-0 flex items-center border-t border-border/50">
+      <div className="flex-shrink-0 flex items-center border-t p-2 border-border/50">
         <div className="flex-1">
           <Playback />
         </div>
