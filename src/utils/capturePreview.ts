@@ -47,6 +47,7 @@ async function handleCapture(payload: any) {
       videoWidth,
       videoHeight,
       replyChannel,
+      progressChannel,
     } = payload
 
     const video = document.createElement('video')
@@ -109,6 +110,11 @@ async function handleCapture(payload: any) {
       ctx.clearRect(0, 0, outputWidth, outputHeight)
       ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, outputWidth, outputHeight)
 
+      if (progressChannel) {
+        const pct = ((t - start) / (end - start)) * 100
+        ;(window as any).electron.respondCaptureProgress(progressChannel, { progress: pct })
+      }
+
       rafId = requestAnimationFrame(draw)
     }
 
@@ -120,6 +126,9 @@ async function handleCapture(payload: any) {
     const buf = new Uint8Array(await blob.arrayBuffer())
     const tempPath = await (window as any).electron.saveTempBlob(buf, 'webm')
     ;(window as any).electron.respondCapture(replyChannel, { path: tempPath })
+    if (progressChannel) {
+      ;(window as any).electron.respondCaptureProgress(progressChannel, { progress: 100 })
+    }
   } catch (err: any) {
     console.error('capture error', err)
     ;(window as any).electron.respondCapture(payload.replyChannel, { error: err?.message || 'capture failed' })

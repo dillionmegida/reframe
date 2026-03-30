@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.on('capture:request', (_: any, payload: any) => cb(payload))
   },
   respondCapture: (channel: string, data: any) => ipcRenderer.send(channel, data),
+  respondCaptureProgress: (channel: string, data: any) => ipcRenderer.send(channel, data),
   saveTempBlob: (data: Uint8Array, ext: string) => ipcRenderer.invoke('save-temp-blob', data, ext),
   onExportProgress: (cb: (pct: number) => void) => {
     ipcRenderer.on('export:progress', (_: any, pct: number) => cb(pct))

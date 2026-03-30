@@ -110,25 +110,37 @@ function requestPreviewCapture(
     keyframes: Keyframe[]
     videoWidth: number
     videoHeight: number
-  }
+  },
+  onProgress?: (pct: number) => void
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const replyChannel = `capture:reply:${randomUUID()}`
+    const progressChannel = `${replyChannel}:progress`
     const timeout = setTimeout(() => {
       ipcMain.removeAllListeners(replyChannel)
+      ipcMain.removeAllListeners(progressChannel)
       reject(new Error('Capture timed out'))
     }, 60_000)
 
     ipcMain.once(replyChannel, (_ev, data) => {
       clearTimeout(timeout)
+      ipcMain.removeAllListeners(progressChannel)
       if (data?.error) return reject(new Error(data.error))
       if (!data?.path) return reject(new Error('No capture path'))
       resolve(data.path)
     })
 
+    if (onProgress) {
+      ipcMain.on(progressChannel, (_ev, data) => {
+        const pct = typeof data?.progress === 'number' ? data.progress : 0
+        onProgress(Math.max(0, Math.min(100, pct)))
+      })
+    }
+
     mainWindow.webContents.send('capture:request', {
       ...payload,
       replyChannel,
+      progressChannel,
     })
   })
 }
@@ -140,7 +152,9 @@ async function exportSegmentSlow(
   outputPath: string,
   keyframes: Keyframe[],
   _tempDir: string,
-  mainWindow: BrowserWindow
+  mainWindow: BrowserWindow,
+  progressOffset: number,
+  progressScale: number
 ): Promise<void> {
   const duration = segment.end - segment.start
   const fps = 30
@@ -155,6 +169,8 @@ async function exportSegmentSlow(
     keyframes,
     videoWidth: project.videoWidth,
     videoHeight: project.videoHeight,
+  }, (pct) => {
+    mainWindow.webContents.send('export:progress', progressOffset + pct * progressScale * 0.9)
   })
 
   // Mux captured video with source audio slice
@@ -176,7 +192,11 @@ async function exportSegmentSlow(
         '-shortest',
       ])
       .output(outputPath)
-      .on('end', () => resolve())
+      .on('end', () => {
+        // Final bump to near completion; caller will send 100%
+        mainWindow.webContents.send('export:progress', progressOffset + 95 * progressScale)
+        resolve()
+      })
       .on('error', (err: Error) => reject(err))
       .run()
   })
@@ -222,8 +242,8 @@ async function exportSingleSlice(
   slice: Slice,
   outputPath: string,
   mainWindow: BrowserWindow,
-  _progressOffset: number,
-  _progressScale: number
+  progressOffset: number,
+  progressScale: number
 ): Promise<void> {
   const activeKeyframes = buildSliceKeyframes(project.keyframes, slice.start, slice.end)
 
@@ -232,8 +252,17 @@ async function exportSingleSlice(
   fs.mkdirSync(tempDir, { recursive: true })
 
   try {
-    await exportSegmentSlow(project, { start: slice.start, end: slice.end, hasZoomChange: true }, outputPath, activeKeyframes, tempDir, mainWindow)
-    mainWindow.webContents.send('export:progress', _progressOffset + 100 * _progressScale)
+    await exportSegmentSlow(
+      project,
+      { start: slice.start, end: slice.end, hasZoomChange: true },
+      outputPath,
+      activeKeyframes,
+      tempDir,
+      mainWindow,
+      progressOffset,
+      progressScale
+    )
+    mainWindow.webContents.send('export:progress', progressOffset + 100 * progressScale)
   } finally {
     if (fs.existsSync(tempDir)) {
       fs.rmSync(tempDir, { recursive: true, force: true })
