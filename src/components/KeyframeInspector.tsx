@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import styled from 'styled-components'
 import { useEditorStore } from '../store/editorStore'
 import type { EasingType } from '../types'
 import { EaseLinearIcon, EaseInIcon, EaseOutIcon, EaseInOutIcon } from './icons'
@@ -20,6 +21,85 @@ const easingOptions: { label: string; value: EasingType }[] = [
   { label: 'Ease Out', value: 'ease-out' },
   { label: 'Ease In-Out', value: 'ease-in-out' },
 ]
+
+const Popover = styled.div`
+  position: absolute;
+  z-index: 50;
+  background: #161616;
+  border: 1px solid #2a2a2a;
+  border-radius: 0.5rem;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+`
+
+const Row = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+`
+
+const Label = styled.span`
+  font-size: 0.625rem;
+  letter-spacing: 0.08em;
+  color: #6b7280;
+  text-transform: uppercase;
+`
+
+const ValueText = styled.span`
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.75rem;
+  color: #e5e5e5;
+`
+
+const EasingRow = styled.div`
+  display: flex;
+  gap: 0.25rem;
+`
+
+const EaseButton = styled.button<{ $active: boolean }>`
+  flex: 1;
+  padding: 0.35rem 0.5rem;
+  border-radius: 0.375rem;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: ${(p) => (p.$active ? '#f97316' : 'rgba(255,255,255,0.05)')};
+  color: ${(p) => (p.$active ? '#000' : '#6b7280')};
+  cursor: pointer;
+  transition: background-color 0.2s, color 0.2s;
+
+  &:hover {
+    background: ${(p) => (p.$active ? 'rgba(249,115,22,0.9)' : 'rgba(255,255,255,0.1)')};
+    color: #e5e5e5;
+  }
+`
+
+const Actions = styled.div`
+  display: flex;
+  gap: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid #2a2a2a;
+`
+
+const ActionButton = styled.button<{ $danger?: boolean }>`
+  flex: 1;
+  font-size: 0.6875rem;
+  padding: 0.4rem;
+  border-radius: 0.375rem;
+  border: none;
+  cursor: pointer;
+  background: ${(p) => (p.$danger ? 'rgba(248,113,113,0.2)' : 'rgba(255,255,255,0.05)')};
+  color: ${(p) => (p.$danger ? '#f87171' : '#e5e5e5')};
+  transition: background-color 0.2s;
+
+  &:hover {
+    background: ${(p) => (p.$danger ? 'rgba(248,113,113,0.3)' : 'rgba(255,255,255,0.1)')};
+  }
+`
 
 export default function KeyframeInspector({ keyframeId, anchorX }: Props) {
   const project = useEditorStore((s) => s.project!)
@@ -58,26 +138,18 @@ export default function KeyframeInspector({ keyframeId, anchorX }: Props) {
   const left = Math.max(8, Math.min(anchorX - popoverWidth / 2, window.innerWidth - popoverWidth - 8))
 
   return (
-    <div
+    <Popover
       ref={popoverRef}
-      className="absolute z-50 bg-panel border border-border rounded-lg shadow-2xl p-3 flex flex-col gap-2.5"
-      style={{
-        bottom: '100%',
-        left,
-        width: popoverWidth,
-        marginBottom: 8,
-      }}
+      style={{ bottom: '100%', left, width: popoverWidth, marginBottom: 8 }}
     >
-      {/* Timestamp */}
-      <div className="flex items-center justify-between">
-        <span className="text-[10px] text-text-muted uppercase tracking-wider">Time</span>
-        <span className="font-mono text-xs text-text-primary">{formatTimestamp(kf.timestamp)}</span>
-      </div>
+      <Row>
+        <Label>Time</Label>
+        <ValueText>{formatTimestamp(kf.timestamp)}</ValueText>
+      </Row>
 
-      {/* Easing buttons */}
       <div>
-        <span className="text-[10px] text-text-muted uppercase tracking-wider block mb-1">Easing</span>
-        <div className="flex gap-1">
+        <Label>Easing</Label>
+        <EasingRow>
           {easingOptions.map((opt) => {
             const Icon =
               opt.value === 'linear'
@@ -89,39 +161,31 @@ export default function KeyframeInspector({ keyframeId, anchorX }: Props) {
                 : EaseInOutIcon
             const active = kf.easing === opt.value
             return (
-              <button
+              <EaseButton
                 key={opt.value}
-                className={`flex-1 py-1.5 rounded transition-colors flex items-center justify-center ${
-                  active ? 'bg-accent text-black' : 'bg-white/5 text-text-muted hover:bg-white/10'
-                }`}
+                $active={active}
                 onClick={() => updateKeyframe(keyframeId, { easing: opt.value })}
                 title={opt.label}
               >
                 <Icon size={18} />
-              </button>
+              </EaseButton>
             )
           })}
-        </div>
+        </EasingRow>
       </div>
 
-      {/* Actions */}
-      <div className="flex gap-2 pt-1 border-t border-border">
-        <button
-          className="flex-1 text-[11px] py-1.5 rounded bg-white/5 text-text-primary hover:bg-white/10 transition-colors"
-          onClick={() => cloneKeyframeMinus(keyframeId)}
-        >
-          Clone to -1s
-        </button>
-        <button
-          className="flex-1 text-[11px] py-1.5 rounded bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors"
+      <Actions>
+        <ActionButton onClick={() => cloneKeyframeMinus(keyframeId)}>Clone to -1s</ActionButton>
+        <ActionButton
+          $danger
           onClick={() => {
             deleteKeyframe(keyframeId)
             selectKeyframe(null)
           }}
         >
           Delete
-        </button>
-      </div>
-    </div>
+        </ActionButton>
+      </Actions>
+    </Popover>
   )
 }

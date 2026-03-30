@@ -1,10 +1,66 @@
 import { useEditorStore } from '../store/editorStore'
+import styled from 'styled-components'
 
 function formatTime(s: number): string {
   const m = Math.floor(s / 60)
   const sec = s - m * 60
   return `${String(m).padStart(2, '0')}:${sec.toFixed(1).padStart(4, '0')}`
 }
+
+const Bar = styled.div`
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 0 1rem;
+`
+
+const ActionButton = styled.button<{ $size?: 'sm' | 'lg' }>`
+  color: #6b7280;
+  background: transparent;
+  border: none;
+  border-radius: 0.375rem;
+  padding: ${(p) => (p.$size === 'lg' ? '0.25rem 0.5rem' : '0.25rem 0.5rem')};
+  font-size: ${(p) => (p.$size === 'lg' ? '1.125rem' : '0.75rem')};
+  font-family: 'IBM Plex Mono', monospace;
+  cursor: pointer;
+  transition: color 0.2s, background-color 0.2s;
+
+  &:hover {
+    color: #e5e5e5;
+    background: rgba(255, 255, 255, 0.05);
+  }
+`
+
+const PlayButton = styled.button`
+  width: 2.5rem;
+  height: 2.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  border: none;
+  background: #f97316;
+  color: #000;
+  cursor: pointer;
+  transition: background-color 0.2s;
+
+  &:hover {
+    background: rgba(249, 115, 22, 0.9);
+  }
+`
+
+const TimeDisplay = styled.div`
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.875rem;
+  color: #e5e5e5;
+  margin-left: 1rem;
+
+  span:last-child {
+    color: #6b7280;
+  }
+`
 
 export default function Playback() {
   const project = useEditorStore((s) => s.project!)
@@ -18,28 +74,16 @@ export default function Playback() {
   const relativeTime = currentTime - project.trim.start
 
   return (
-    <div className="h-full flex items-center justify-center gap-4 px-4">
-      {/* Step back 5s */}
-      <button
-        className="text-text-muted hover:text-text-primary text-xs font-mono px-2 py-1 rounded hover:bg-white/5 transition-colors"
-        onClick={() => setCurrentTime(currentTime - 5)}
-        title="Step back 5s (Shift+←)"
-      >
+    <Bar>
+      <ActionButton onClick={() => setCurrentTime(currentTime - 5)} title="Step back 5s (Shift+←)">
         -5s
-      </button>
+      </ActionButton>
 
-      {/* Step back 1 frame */}
-      <button
-        className="text-text-muted hover:text-text-primary text-lg px-2 py-1 rounded hover:bg-white/5 transition-colors"
-        onClick={() => setCurrentTime(currentTime - 1 / fps)}
-        title="Step back 1 frame (←)"
-      >
+      <ActionButton $size="lg" onClick={() => setCurrentTime(currentTime - 1 / fps)} title="Step back 1 frame (←)">
         ‹
-      </button>
+      </ActionButton>
 
-      {/* Play/Pause */}
-      <button
-        className="w-10 h-10 flex items-center justify-center rounded-full bg-accent text-black hover:bg-accent/90 transition-colors"
+      <PlayButton
         onClick={() => {
           if (!isPlaying && currentTime >= project.trim.end) {
             setCurrentTime(project.trim.start)
@@ -58,32 +102,21 @@ export default function Playback() {
             <polygon points="6,4 20,12 6,20" />
           </svg>
         )}
-      </button>
+      </PlayButton>
 
-      {/* Step forward 1 frame */}
-      <button
-        className="text-text-muted hover:text-text-primary text-lg px-2 py-1 rounded hover:bg-white/5 transition-colors"
-        onClick={() => setCurrentTime(currentTime + 1 / fps)}
-        title="Step forward 1 frame (→)"
-      >
+      <ActionButton $size="lg" onClick={() => setCurrentTime(currentTime + 1 / fps)} title="Step forward 1 frame (→)">
         ›
-      </button>
+      </ActionButton>
 
-      {/* Step forward 5s */}
-      <button
-        className="text-text-muted hover:text-text-primary text-xs font-mono px-2 py-1 rounded hover:bg-white/5 transition-colors"
-        onClick={() => setCurrentTime(currentTime + 5)}
-        title="Step forward 5s (Shift+→)"
-      >
+      <ActionButton onClick={() => setCurrentTime(currentTime + 5)} title="Step forward 5s (Shift+→)">
         +5s
-      </button>
+      </ActionButton>
 
-      {/* Time display */}
-      <div className="font-mono text-sm text-text-primary ml-4">
+      <TimeDisplay>
         <span>{formatTime(Math.max(0, relativeTime))}</span>
-        <span className="text-text-muted"> / </span>
-        <span className="text-text-muted">{formatTime(trimDuration)}</span>
-      </div>
-    </div>
+        <span> / </span>
+        <span>{formatTime(trimDuration)}</span>
+      </TimeDisplay>
+    </Bar>
   )
 }

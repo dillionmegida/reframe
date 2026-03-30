@@ -1,6 +1,101 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
+import styled from 'styled-components'
 import { useEditorStore } from '../store/editorStore'
 import { interpolateAtTime } from '../utils/interpolate'
+
+const Container = styled.div`
+  width: 100%;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+  background: #161616;
+`
+
+const VideoEl = styled.video`
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+`
+
+const CropOverlay = styled.div<{
+  $left: number
+  $top: number
+  $width: number
+  $height: number
+  $isDragging: boolean
+  $isPlaying: boolean
+  $isResizing: boolean
+}>`
+  position: absolute;
+  left: ${({ $left }) => `${$left}px`};
+  top: ${({ $top }) => `${$top}px`};
+  width: ${({ $width }) => `${$width}px`};
+  height: ${({ $height }) => `${$height}px`};
+  border: 2px dashed #f97316;
+  background: rgba(249, 115, 22, 0.08);
+  cursor: ${({ $isDragging }) => ($isDragging ? 'grabbing' : 'grab')};
+  z-index: 10;
+  pointer-events: auto;
+  transition: ${({ $isDragging, $isPlaying, $isResizing }) =>
+    $isDragging || $isPlaying || $isResizing
+      ? 'none'
+      : 'left 0.15s ease-out, top 0.15s ease-out, width 0.15s ease-out, height 0.15s ease-out'};
+  will-change: left, top, width, height;
+`
+
+const ResizeHandle = styled.div<{ $left: number; $top: number; $cursor: string }>`
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  background: #f97316;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.35);
+  cursor: ${({ $cursor }) => $cursor};
+  z-index: 12;
+  left: ${({ $left }) => `${$left}px`};
+  top: ${({ $top }) => `${$top}px`};
+`
+
+const DimLayer = styled.div<{ $x: number; $y: number; $width: number; $height: number }>`
+  position: absolute;
+  left: ${({ $x }) => `${$x}px`};
+  top: ${({ $y }) => `${$y}px`};
+  width: ${({ $width }) => `${$width}px`};
+  height: ${({ $height }) => `${$height}px`};
+  pointer-events: none;
+  z-index: 5;
+`
+
+const DimPart = styled.div<{
+  $left?: number
+  $top?: number
+  $width?: number | string
+  $height?: number | string
+  $bottom?: number
+  $right?: number
+}>`
+  position: absolute;
+  ${({ $left }) => ($left !== undefined ? `left: ${$left}px;` : '')}
+  ${({ $top }) => ($top !== undefined ? `top: ${$top}px;` : '')}
+  ${({ $bottom }) => ($bottom !== undefined ? `bottom: ${$bottom}px;` : '')}
+  ${({ $right }) => ($right !== undefined ? `right: ${$right}px;` : '')}
+  ${({ $width }) =>
+    $width !== undefined ? `width: ${typeof $width === 'string' ? $width : `${$width}px`};` : ''}
+  ${({ $height }) =>
+    $height !== undefined ? `height: ${typeof $height === 'string' ? $height : `${$height}px`};` : ''}
+  background: rgba(0, 0, 0, 0.4);
+`
+
+const SnapLine = styled.div<{ $left: number; $top: number; $height: number }>`
+  position: absolute;
+  left: ${({ $left }) => `${$left}px`};
+  top: ${({ $top }) => `${$top}px`};
+  width: 1px;
+  height: ${({ $height }) => `${$height}px`};
+  background: #f97316;
+  z-index: 20;
+  pointer-events: none;
+`
 
 export default function SourcePanel() {
   const project = useEditorStore((s) => s.project!)
@@ -323,165 +418,78 @@ export default function SourcePanel() {
   )
 
   return (
-    <div
-      ref={containerRef}
-      className="w-full h-full panel-bg relative overflow-hidden"
-      onWheel={handleWheel}
-    >
-      <video
+    <Container ref={containerRef} onWheel={handleWheel}>
+      <VideoEl
         ref={videoRef}
         id="source-video"
         src={`file://${project.videoPath}`}
-        className="w-full h-full object-contain"
         muted
         playsInline
         preload="auto"
         onLoadedMetadata={updateVideoRendered}
       />
 
-      {/* Crop rectangle overlay */}
-      <div
-        style={{
-          position: 'absolute',
-          left: finalCropX,
-          top: finalCropY,
-          width: cropRenderW,
-          height: cropRenderH,
-          border: '2px dashed #f97316',
-          background: 'rgba(249,115,22,0.08)',
-          cursor: isDragging ? 'grabbing' : 'grab',
-          zIndex: 10,
-          pointerEvents: 'auto',
-          transition: (isDragging || isPlaying || isResizing) ? 'none' : 'left 0.15s ease-out, top 0.15s ease-out, width 0.15s ease-out, height 0.15s ease-out',
-        }}
+      <CropOverlay
+        $left={finalCropX}
+        $top={finalCropY}
+        $width={cropRenderW}
+        $height={cropRenderH}
+        $isDragging={isDragging}
+        $isPlaying={isPlaying}
+        $isResizing={isResizing}
         onMouseDown={handleMouseDown}
       />
 
-      {/* Corner handles for resize */}
       {[
-        { key: 'tl', style: { left: finalCropX - 6, top: finalCropY - 6 } },
-        { key: 'tr', style: { left: finalCropX + cropRenderW - 6, top: finalCropY - 6 } },
-        { key: 'bl', style: { left: finalCropX - 6, top: finalCropY + cropRenderH - 6 } },
-        { key: 'br', style: { left: finalCropX + cropRenderW - 6, top: finalCropY + cropRenderH - 6 } },
+        { key: 'tl', left: finalCropX - 6, top: finalCropY - 6, cursor: 'nw-resize' },
+        { key: 'tr', left: finalCropX + cropRenderW - 6, top: finalCropY - 6, cursor: 'ne-resize' },
+        { key: 'bl', left: finalCropX - 6, top: finalCropY + cropRenderH - 6, cursor: 'sw-resize' },
+        { key: 'br', left: finalCropX + cropRenderW - 6, top: finalCropY + cropRenderH - 6, cursor: 'se-resize' },
       ].map((h) => (
-        <div
+        <ResizeHandle
           key={h.key}
+          $left={h.left}
+          $top={h.top}
+          $cursor={h.cursor}
           onMouseDown={handleResizeMouseDown}
-          style={{
-            position: 'absolute',
-            width: 12,
-            height: 12,
-            borderRadius: 2,
-            background: '#f97316',
-            boxShadow: '0 0 4px rgba(0,0,0,0.35)',
-            cursor: `${h.key[0] === 't' ? 'n' : 's'}${h.key[1] === 'l' ? 'w' : 'e'}-resize`,
-            zIndex: 12,
-            ...h.style,
-          }}
         />
       ))}
 
-      {/* Dim areas outside crop */}
-      <div
-        style={{
-          position: 'absolute',
-          left: videoRendered.x,
-          top: videoRendered.y,
-          width: videoRendered.w,
-          height: videoRendered.h,
-          pointerEvents: 'none',
-          zIndex: 5,
-        }}
-      >
-        {/* Top */}
-        <div
-          style={{
-            position: 'absolute',
-            left: 0,
-            top: 0,
-            width: '100%',
-            height: Math.max(0, finalCropY - videoRendered.y),
-            background: 'rgba(0,0,0,0.4)',
-          }}
+      <DimLayer $x={videoRendered.x} $y={videoRendered.y} $width={videoRendered.w} $height={videoRendered.h}>
+        <DimPart $left={0} $top={0} $width="100%" $height={Math.max(0, finalCropY - videoRendered.y)} />
+        <DimPart
+          $left={0}
+          $bottom={0}
+          $width="100%"
+          $height={Math.max(0, videoRendered.y + videoRendered.h - finalCropY - cropRenderH)}
         />
-        {/* Bottom */}
-        <div
-          style={{
-            position: 'absolute',
-            left: 0,
-            bottom: 0,
-            width: '100%',
-            height: Math.max(0, videoRendered.y + videoRendered.h - finalCropY - cropRenderH),
-            background: 'rgba(0,0,0,0.4)',
-          }}
+        <DimPart
+          $left={0}
+          $top={Math.max(0, finalCropY - videoRendered.y)}
+          $width={Math.max(0, finalCropX - videoRendered.x)}
+          $height={cropRenderH}
         />
-        {/* Left */}
-        <div
-          style={{
-            position: 'absolute',
-            left: 0,
-            top: Math.max(0, finalCropY - videoRendered.y),
-            width: Math.max(0, finalCropX - videoRendered.x),
-            height: cropRenderH,
-            background: 'rgba(0,0,0,0.4)',
-          }}
+        <DimPart
+          $right={0}
+          $top={Math.max(0, finalCropY - videoRendered.y)}
+          $width={Math.max(0, videoRendered.x + videoRendered.w - finalCropX - cropRenderW)}
+          $height={cropRenderH}
         />
-        {/* Right */}
-        <div
-          style={{
-            position: 'absolute',
-            right: 0,
-            top: Math.max(0, finalCropY - videoRendered.y),
-            width: Math.max(0, videoRendered.x + videoRendered.w - finalCropX - cropRenderW),
-            height: cropRenderH,
-            background: 'rgba(0,0,0,0.4)',
-          }}
-        />
-      </div>
+      </DimLayer>
 
-      {/* Snap guides */}
       {showSnaps.left && (
-        <div
-          style={{
-            position: 'absolute',
-            left: snapPositions.left,
-            top: videoRendered.y,
-            width: 1,
-            height: videoRendered.h,
-            background: '#f97316',
-            zIndex: 20,
-            pointerEvents: 'none',
-          }}
-        />
+        <SnapLine $left={snapPositions.left} $top={videoRendered.y} $height={videoRendered.h} />
       )}
       {showSnaps.center && (
-        <div
-          style={{
-            position: 'absolute',
-            left: snapPositions.center + cropRenderW / 2,
-            top: videoRendered.y,
-            width: 1,
-            height: videoRendered.h,
-            background: '#f97316',
-            zIndex: 20,
-            pointerEvents: 'none',
-          }}
+        <SnapLine
+          $left={snapPositions.center + cropRenderW / 2}
+          $top={videoRendered.y}
+          $height={videoRendered.h}
         />
       )}
       {showSnaps.right && (
-        <div
-          style={{
-            position: 'absolute',
-            left: snapPositions.right + cropRenderW,
-            top: videoRendered.y,
-            width: 1,
-            height: videoRendered.h,
-            background: '#f97316',
-            zIndex: 20,
-            pointerEvents: 'none',
-          }}
-        />
+        <SnapLine $left={snapPositions.right + cropRenderW} $top={videoRendered.y} $height={videoRendered.h} />
       )}
-    </div>
+    </Container>
   )
 }

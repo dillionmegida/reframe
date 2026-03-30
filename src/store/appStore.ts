@@ -7,25 +7,36 @@ type Route =
   | { view: 'project'; projectId: string }
   | { view: 'editor'; projectId: string; videoId: string }
 
-// Parse URL hash to route format: #/project/:projectId or #/project/:projectId/:videoId
-function parseHashRoute(hash: string): Route | null {
-  const match = hash.match(/^#\/project\/([^/]+)(?:\/([^/]+))?$/)
-  if (!match) return null
-  const [, projectId, videoId] = match
-  if (videoId) {
-    return { view: 'editor', projectId, videoId }
+const ROUTE_STORAGE_KEY = 'reframe.route'
+
+function readStoredRoute(): Route | null {
+  try {
+    const raw = localStorage.getItem(ROUTE_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') return null
+    if (parsed.view === 'projects') return { view: 'projects' }
+    if (parsed.view === 'project' && typeof parsed.projectId === 'string') {
+      return { view: 'project', projectId: parsed.projectId }
+    }
+    if (
+      parsed.view === 'editor' &&
+      typeof parsed.projectId === 'string' &&
+      typeof parsed.videoId === 'string'
+    ) {
+      return { view: 'editor', projectId: parsed.projectId, videoId: parsed.videoId }
+    }
+  } catch {
+    // ignore malformed storage
   }
-  return { view: 'project', projectId }
+  return null
 }
 
-// Update URL hash based on route
-function updateHashRoute(route: Route): void {
-  if (route.view === 'projects') {
-    window.location.hash = ''
-  } else if (route.view === 'project') {
-    window.location.hash = `#/project/${route.projectId}`
-  } else if (route.view === 'editor') {
-    window.location.hash = `#/project/${route.projectId}/${route.videoId}`
+function writeStoredRoute(route: Route): void {
+  try {
+    localStorage.setItem(ROUTE_STORAGE_KEY, JSON.stringify(route))
+  } catch {
+    // ignore storage failures
   }
 }
 
@@ -70,18 +81,17 @@ export const useAppStore = create<AppState>((set, get) => ({
   init: async () => {
     try {
       const data: AppData = await window.electron.loadAppData()
-      // Parse URL hash to restore route
-      const hashRoute = parseHashRoute(window.location.hash)
+      const storedRoute = readStoredRoute()
       set({
         basePath: data.basePath || null,
         projects: data.projects || [],
         videos: data.videos || [],
         loaded: true,
-        route: hashRoute || { view: 'projects' },
+        route: storedRoute || { view: 'projects' },
       })
     } catch {
-      const hashRoute = parseHashRoute(window.location.hash)
-      set({ loaded: true, route: hashRoute || { view: 'projects' } })
+      const storedRoute = readStoredRoute()
+      set({ loaded: true, route: storedRoute || { view: 'projects' } })
     }
   },
 
@@ -98,8 +108,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   navigate: (route) => {
     set({ route })
-    // Update URL hash to persist route
-    updateHashRoute(route)
+    writeStoredRoute(route)
   },
 
   createProject: (name) => {
@@ -110,7 +119,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       projects: [...s.projects, project],
       route,
     }))
-    updateHashRoute(route)
+    writeStoredRoute(route)
     get().persist()
     return id
   },
@@ -132,7 +141,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       videos: s.videos.filter((v) => v.projectId !== id),
       route: newRoute,
     }))
-    updateHashRoute(newRoute)
+    writeStoredRoute(newRoute)
     get().persist()
   },
 
@@ -165,7 +174,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       videos: s.videos.filter((v) => v.id !== id),
       route: newRoute,
     }))
-    updateHashRoute(newRoute)
+    writeStoredRoute(newRoute)
     get().persist()
   },
 

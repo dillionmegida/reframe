@@ -1,4 +1,5 @@
 import { useEffect, useCallback } from 'react'
+import styled from 'styled-components'
 import { useEditorStore } from '../store/editorStore'
 import { useAppStore } from '../store/appStore'
 import SourcePanel from '../components/SourcePanel'
@@ -6,6 +7,38 @@ import PreviewPanel from '../components/PreviewPanel'
 import Timeline from '../components/Timeline'
 import Toolbar from '../components/Toolbar'
 import { interpolateAtTime } from '../utils/interpolate'
+
+const Container = styled.div`
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+`
+
+const MainContent = styled.div`
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  border-bottom: 1px solid #2a2a2a;
+`
+
+const SourceContainer = styled.div`
+  flex: 1;
+  min-width: 0;
+  position: relative;
+`
+
+const PreviewContainer = styled.div`
+  width: 360px;
+  border-left: 1px solid #2a2a2a;
+  flex-shrink: 0;
+  display: flex;
+`
+
+const TimelineContainer = styled.div`
+  height: 160px;
+  flex-shrink: 0;
+`
 
 export default function EditorScreen() {
   const project = useEditorStore((s) => s.project)
@@ -162,19 +195,19 @@ export default function EditorScreen() {
   if (!project) return null
 
   return (
-    <div className="w-full h-full flex flex-col">
+    <Container>
       <Toolbar />
-      <div className="flex flex-1 min-h-0 border-b border-border">
-        <div className="flex-1 min-w-0 relative">
+      <MainContent>
+        <SourceContainer>
           <SourcePanel />
-        </div>
-        <div className="w-[360px] border-l border-border flex-shrink-0 flex">
+        </SourceContainer>
+        <PreviewContainer>
           <PreviewPanel />
-        </div>
-      </div>
-      <div className="h-[160px] flex-shrink-0">
+        </PreviewContainer>
+      </MainContent>
+      <TimelineContainer>
         <Timeline />
-      </div>
-    </div>
+      </TimelineContainer>
+    </Container>
   )
 }

@@ -1,10 +1,104 @@
 import { useEffect } from 'react'
+import styled from 'styled-components'
 import { useAppStore } from './store/appStore'
 import { useEditorStore } from './store/editorStore'
 import Sidebar from './components/Sidebar'
 import ProjectDetail from './screens/ProjectDetail'
 import EditorScreen from './screens/EditorScreen'
 import BasePathSetup from './screens/BasePathSetup'
+
+const LoadingContainer = styled.div`
+  width: 100%;
+  height: 100%;
+  background: #0e0e0e;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+`
+
+const LoadingText = styled.span`
+  color: #6b7280;
+  font-size: 0.875rem;
+`
+
+const AppContainer = styled.div`
+  width: 100%;
+  height: 100%;
+  background: #0e0e0e;
+`
+
+const MainLayout = styled.div`
+  width: 100%;
+  height: 100%;
+  background: #0e0e0e;
+  display: flex;
+`
+
+const MainContent = styled.div`
+  flex: 1;
+  min-width: 0;
+`
+
+const WelcomeContainer = styled.div`
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+`
+
+const WelcomeHeader = styled.div`
+  height: 3rem;
+  display: flex;
+  align-items: center;
+  padding: 0 1rem;
+  border-bottom: 1px solid #2a2a2a;
+  background-color: #161616;
+  position: relative;
+  flex-shrink: 0;
+
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: url('/assets/noise.svg');
+    background-repeat: repeat;
+    opacity: 0.4;
+    pointer-events: none;
+  }
+`
+
+const WelcomeTitle = styled.span`
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  color: #e5e5e5;
+  user-select: none;
+  position: relative;
+  z-index: 1;
+`
+
+const WelcomeBody = styled.div`
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+`
+
+const WelcomeContent = styled.div`
+  text-align: center;
+`
+
+const WelcomeHeading = styled.h1`
+  font-size: 1.125rem;
+  font-weight: 500;
+  color: #e5e5e5;
+  margin-bottom: 0.5rem;
+`
+
+const WelcomeText = styled.p`
+  font-size: 0.875rem;
+  color: #6b7280;
+`
 
 export default function App() {
   const loaded = useAppStore((s) => s.loaded)
@@ -19,7 +113,6 @@ export default function App() {
     init()
   }, [init])
 
-  // Load video into editor when route is restored from URL hash
   useEffect(() => {
     if (!loaded) return
     if (route.view === 'editor' && !editorProject) {
@@ -32,60 +125,52 @@ export default function App() {
 
   if (!loaded) {
     return (
-      <div className="w-full h-full bg-bg flex items-center justify-center">
-        <span className="text-text-muted text-sm">Loading...</span>
-      </div>
+      <LoadingContainer>
+        <LoadingText>Loading...</LoadingText>
+      </LoadingContainer>
     )
   }
 
-  // Show base path setup if not configured
   if (!basePath) {
     return <BasePathSetup />
   }
 
-  // Editor view is full-width (no sidebar) for maximum workspace
   if (route.view === 'editor' && editorProject) {
     return (
-      <div className="w-full h-full bg-bg">
+      <AppContainer>
         <EditorScreen />
-      </div>
+      </AppContainer>
     )
   }
 
   return (
-    <div className="w-full h-full bg-bg flex">
+    <MainLayout>
       <Sidebar />
-      <div className="flex-1 min-w-0">
+      <MainContent>
         {route.view === 'project' ? (
           <ProjectDetail projectId={route.projectId} />
         ) : (
           <WelcomeScreen />
         )}
-      </div>
-    </div>
+      </MainContent>
+    </MainLayout>
   )
 }
 
 function WelcomeScreen() {
   return (
-    <div className="w-full h-full flex flex-col">
-      {/* Drag region header */}
-      <div
-        className="h-12 flex items-center px-4 border-b border-border panel-bg flex-shrink-0"
-        style={{ WebkitAppRegion: 'drag' } as any}
-      >
-        <span className="text-sm font-semibold tracking-[0.2em] text-text-primary select-none">
-          REFRAME
-        </span>
-      </div>
-      <div className="flex-1 flex items-center justify-center">
-        <div className="text-center">
-          <h1 className="text-lg font-medium text-text-primary mb-2">Welcome to Reframe</h1>
-          <p className="text-sm text-text-muted">
+    <WelcomeContainer>
+      <WelcomeHeader style={{ WebkitAppRegion: 'drag' } as any}>
+        <WelcomeTitle>REFRAME</WelcomeTitle>
+      </WelcomeHeader>
+      <WelcomeBody>
+        <WelcomeContent>
+          <WelcomeHeading>Welcome to Reframe</WelcomeHeading>
+          <WelcomeText>
             Select a project from the sidebar or create a new one to get started.
-          </p>
-        </div>
-      </div>
-    </div>
+          </WelcomeText>
+        </WelcomeContent>
+      </WelcomeBody>
+    </WelcomeContainer>
   )
 }

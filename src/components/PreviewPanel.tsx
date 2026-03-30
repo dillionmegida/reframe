@@ -1,6 +1,55 @@
 import { useRef, useEffect, useState } from 'react'
+import styled from 'styled-components'
 import { useEditorStore } from '../store/editorStore'
 import { interpolateAtTime } from '../utils/interpolate'
+
+const Wrapper = styled.div`
+  height: 100%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+`
+
+const PlayerFrame = styled.div<{ $w: number; $h: number }>`
+  position: relative;
+  overflow: hidden;
+  border-radius: 0.125rem;
+  width: ${(p) => (p.$w ? `${p.$w}px` : '320px')};
+  height: ${(p) => (p.$h ? `${p.$h}px` : '568px')};
+  background: #000;
+`
+
+const CanvasEl = styled.canvas<{ $w: number; $h: number }>`
+  width: ${(p) => (p.$w ? `${p.$w}px` : '320px')};
+  height: ${(p) => (p.$h ? `${p.$h}px` : '568px')};
+  display: block;
+`
+
+const LoadingOverlay = styled.div`
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6b7280;
+  font-size: 0.75rem;
+`
+
+const HudBadge = styled.div`
+  position: absolute;
+  bottom: 0.5rem;
+  right: 0.5rem;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.75rem;
+  color: #f97316;
+  background: rgba(0, 0, 0, 0.6);
+  padding: 0.375rem 0.6rem;
+  border-radius: 0.25rem;
+  z-index: 10;
+`
 
 export default function PreviewPanel() {
   const project = useEditorStore((s) => s.project!)
@@ -125,36 +174,12 @@ export default function PreviewPanel() {
   }, [project.videoPath])
 
   return (
-    <div ref={wrapperRef} className="h-full w-full flex flex-col items-center justify-center p-4">
-      <div
-        className="relative overflow-hidden rounded-sm"
-        style={{
-          width: containerSize.w || 320,
-          height: containerSize.h || 568,
-          background: '#000',
-        }}
-      >
-        <canvas
-          ref={canvasRef}
-          style={{
-            width: containerSize.w || 320,
-            height: containerSize.h || 568,
-            display: 'block',
-          }}
-        />
-        {containerSize.w === 0 && (
-          <div className="absolute inset-0 flex items-center justify-center text-text-muted text-xs">
-            Loading...
-          </div>
-        )}
-        {/* HUD badge */}
-        <div
-          ref={hudRef}
-          className="absolute bottom-2 right-2 font-mono text-xs text-accent bg-black/60 px-1.5 py-0.5 rounded z-10"
-        >
-          1.0×
-        </div>
-      </div>
-    </div>
+    <Wrapper ref={wrapperRef}>
+      <PlayerFrame $w={containerSize.w || 320} $h={containerSize.h || 568}>
+        <CanvasEl ref={canvasRef} $w={containerSize.w || 320} $h={containerSize.h || 568} />
+        {containerSize.w === 0 && <LoadingOverlay>Loading...</LoadingOverlay>}
+        <HudBadge ref={hudRef}>1.0×</HudBadge>
+      </PlayerFrame>
+    </Wrapper>
   )
 }

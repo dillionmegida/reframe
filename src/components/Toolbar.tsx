@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import styled from 'styled-components'
 import { LeftCaretIcon } from './icons'
 import { useEditorStore } from '../store/editorStore'
 import { useAppStore } from '../store/appStore'
@@ -15,6 +16,208 @@ const ratioOptions: { label: string; value: AspectRatio; w: number; h: number }[
   { label: '4:5', value: '4:5', w: 1080, h: 1350 },
   { label: '1:1', value: '1:1', w: 1080, h: 1080 },
 ]
+
+const Bar = styled.div`
+  height: 3rem;
+  display: flex;
+  align-items: center;
+  padding: 0 1rem;
+  gap: 0.75rem;
+  border-bottom: 1px solid #2a2a2a;
+  background: #161616;
+  position: relative;
+  flex-shrink: 0;
+
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: url('/assets/noise.svg');
+    background-repeat: repeat;
+    opacity: 0.4;
+    pointer-events: none;
+  }
+
+  > * {
+    position: relative;
+    z-index: 1;
+  }
+`
+
+const Spacer = styled.div`
+  flex: 1;
+`
+
+const Ghost = styled.div`
+  width: 4rem;
+`
+
+const IconButton = styled.button`
+  color: #6b7280;
+  background: transparent;
+  border: none;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.375rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: color 0.2s, background-color 0.2s;
+
+  &:hover {
+    color: #e5e5e5;
+    background: rgba(255, 255, 255, 0.05);
+  }
+`
+
+const Divider = styled.div`
+  width: 1px;
+  height: 1.25rem;
+  background: #2a2a2a;
+`
+
+const RatioGroup = styled.div`
+  display: flex;
+  gap: 0.25rem;
+`
+
+const RatioButton = styled.button<{ $active: boolean }>`
+  padding: 0.25rem 0.6rem;
+  font-size: 0.75rem;
+  border-radius: 0.375rem;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.2s, color 0.2s;
+  background: ${(p) => (p.$active ? '#f97316' : 'transparent')};
+  color: ${(p) => (p.$active ? '#000' : '#6b7280')};
+  font-weight: ${(p) => (p.$active ? 600 : 400)};
+
+  &:hover {
+    background: ${(p) => (p.$active ? 'rgba(249, 115, 22, 0.9)' : 'rgba(255, 255, 255, 0.05)')};
+    color: ${(p) => (p.$active ? '#000' : '#e5e5e5')};
+  }
+`
+
+const TrimText = styled.span`
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.75rem;
+  color: #6b7280;
+`
+
+const HistoryButton = styled.button<{ $enabled: boolean }>`
+  padding: 0.25rem 0.5rem;
+  font-size: 0.875rem;
+  border-radius: 0.375rem;
+  border: none;
+  cursor: ${(p) => (p.$enabled ? 'pointer' : 'not-allowed')};
+  color: ${(p) => (p.$enabled ? '#e5e5e5' : 'rgba(229, 229, 229, 0.3)')};
+  background: transparent;
+  transition: background-color 0.2s;
+
+  &:hover {
+    background: ${(p) => (p.$enabled ? 'rgba(255, 255, 255, 0.05)' : 'transparent')};
+  }
+`
+
+const ExportButton = styled.button<{ $enabled: boolean }>`
+  padding: 0.45rem 1rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 0.375rem;
+  border: none;
+  cursor: ${(p) => (p.$enabled ? 'pointer' : 'not-allowed')};
+  background: ${(p) => (p.$enabled ? '#f97316' : 'rgba(255, 255, 255, 0.05)')};
+  color: ${(p) => (p.$enabled ? '#000' : 'rgba(107, 114, 128, 0.4)')};
+  transition: background-color 0.2s;
+
+  &:hover {
+    background: ${(p) => (p.$enabled ? 'rgba(249, 115, 22, 0.9)' : 'rgba(255, 255, 255, 0.05)')};
+  }
+`
+
+const ModalBackdrop = styled.div`
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+`
+
+const Modal = styled.div`
+  width: 380px;
+  background: #161616;
+  border: 1px solid #2a2a2a;
+  border-radius: 0.75rem;
+  padding: 1.5rem;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+`
+
+const ModalTitle = styled.h2`
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #e5e5e5;
+`
+
+const ProgressTrack = styled.div`
+  width: 100%;
+  height: 0.5rem;
+  background: #2a2a2a;
+  border-radius: 9999px;
+  overflow: hidden;
+`
+
+const ProgressFill = styled.div<{ $pct: number }>`
+  height: 100%;
+  background: #f97316;
+  width: ${(p) => Math.max(0, Math.min(100, p.$pct))}%;
+  transition: width 0.3s ease;
+  border-radius: 9999px;
+`
+
+const MonoText = styled.p`
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.75rem;
+  color: #6b7280;
+`
+
+const ErrorText = styled.p`
+  font-size: 0.875rem;
+  color: #f87171;
+`
+
+const PrimaryGhost = styled.button`
+  padding: 0.6rem 1rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 0.375rem;
+  border: none;
+  background: rgba(255, 255, 255, 0.05);
+  color: #e5e5e5;
+  cursor: pointer;
+  transition: background-color 0.2s;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
+`
+
+const SecondaryGhost = styled.button`
+  padding: 0.6rem 1rem;
+  font-size: 0.75rem;
+  border-radius: 0.375rem;
+  border: none;
+  background: rgba(255, 255, 255, 0.05);
+  color: #6b7280;
+  cursor: pointer;
+  transition: background-color 0.2s;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
+`
 
 export default function Toolbar() {
   const project = useEditorStore((s) => s.project!)
@@ -54,12 +257,11 @@ export default function Toolbar() {
     })
 
     try {
-      // Get project name for export path
       const reframeProject = route.view === 'editor' ? getProject(route.projectId) : null
       const projectName = reframeProject?.name || 'unknown-project'
-      
-      const result = await window.electron.exportVideo({ 
-        project, 
+
+      const result = await window.electron.exportVideo({
+        project,
         slices: exportableSlices,
         basePath,
         projectName,
@@ -76,15 +278,10 @@ export default function Toolbar() {
 
   return (
     <>
-      <div className="h-12 flex items-center px-4 gap-3 border-b border-border panel-bg flex-shrink-0"
-        style={{ WebkitAppRegion: 'drag' } as any}
-      >
-        {/* Drag region spacer for traffic lights */}
-        <div className="w-16" />
+      <Bar style={{ WebkitAppRegion: 'drag' } as any}>
+        <Ghost />
 
-        {/* Back to project */}
-        <button
-          className="text-text-muted hover:text-text-primary text-xs px-2 py-1 rounded hover:bg-white/5 transition-colors"
+        <IconButton
           onClick={() => {
             closeProject()
             if (route.view === 'editor') {
@@ -96,134 +293,84 @@ export default function Toolbar() {
           style={{ WebkitAppRegion: 'no-drag' } as any}
           title="Back to project"
         >
-          <LeftCaretIcon size={20} className="inline-block" />
-        </button>
+          <LeftCaretIcon size={20} />
+        </IconButton>
 
-        {/* Divider */}
-        <div className="w-px h-5 bg-border" />
+        <Divider />
 
-        {/* Ratio buttons */}
-        <div className="flex gap-1" style={{ WebkitAppRegion: 'no-drag' } as any}>
+        <RatioGroup style={{ WebkitAppRegion: 'no-drag' } as any}>
           {ratioOptions.map((opt) => (
-            <button
+            <RatioButton
               key={opt.value}
-              className={`px-2.5 py-1 text-xs rounded transition-colors ${
-                project.outputRatio === opt.value
-                  ? 'bg-accent text-black font-medium'
-                  : 'text-text-muted hover:text-text-primary hover:bg-white/5'
-              }`}
+              $active={project.outputRatio === opt.value}
               onClick={() => setOutputRatio(opt.value, opt.w, opt.h)}
             >
               {opt.label}
-            </button>
+            </RatioButton>
           ))}
-        </div>
+        </RatioGroup>
 
-        {/* Divider */}
-        <div className="w-px h-5 bg-border" />
+        <Divider />
 
-        {/* Trim display */}
-        <span className="font-mono text-xs text-text-muted" style={{ WebkitAppRegion: 'no-drag' } as any}>
+        <TrimText style={{ WebkitAppRegion: 'no-drag' } as any}>
           {formatTime(project.trim.start)} – {formatTime(project.trim.end)}
-        </span>
+        </TrimText>
 
-        {/* Spacer */}
-        <div className="flex-1" />
+        <Spacer />
 
-        {/* Undo/Redo */}
-        <div className="flex gap-1" style={{ WebkitAppRegion: 'no-drag' } as any}>
-          <button
-            className={`px-2 py-1 text-sm rounded transition-colors ${
-              past.length > 0
-                ? 'text-text-primary hover:bg-white/5'
-                : 'text-text-muted/30 cursor-not-allowed'
-            }`}
-            onClick={undo}
-            disabled={past.length === 0}
-            title="Undo (Cmd+Z)"
-          >
+        <div style={{ display: 'flex', gap: '0.25rem', WebkitAppRegion: 'no-drag' } as any}>
+          <HistoryButton $enabled={past.length > 0} onClick={undo} disabled={past.length === 0} title="Undo (Cmd+Z)">
             ↩
-          </button>
-          <button
-            className={`px-2 py-1 text-sm rounded transition-colors ${
-              future.length > 0
-                ? 'text-text-primary hover:bg-white/5'
-                : 'text-text-muted/30 cursor-not-allowed'
-            }`}
-            onClick={redo}
-            disabled={future.length === 0}
-            title="Redo (Cmd+Shift+Z)"
-          >
+          </HistoryButton>
+          <HistoryButton $enabled={future.length > 0} onClick={redo} disabled={future.length === 0} title="Redo (Cmd+Shift+Z)">
             ↪
-          </button>
+          </HistoryButton>
         </div>
 
-        {/* Export button */}
-        <button
-          className={`px-4 py-1.5 text-xs font-medium rounded transition-colors ${
-            hasExportableSlices
-              ? 'bg-accent text-black hover:bg-accent/90'
-              : 'bg-white/5 text-text-muted/40 cursor-not-allowed'
-          }`}
+        <ExportButton
           onClick={handleExport}
           disabled={!hasExportableSlices}
+          $enabled={hasExportableSlices}
           style={{ WebkitAppRegion: 'no-drag' } as any}
         >
           {hasExportableSlices
             ? `Export ${exportableSlices.length} Slice${exportableSlices.length !== 1 ? 's' : ''}`
             : 'Export'}
-        </button>
-      </div>
+        </ExportButton>
+      </Bar>
 
-      {/* Export modal */}
       {showExportModal && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[100]">
-          <div className="bg-panel border border-border rounded-xl p-6 w-[380px] shadow-2xl flex flex-col gap-4">
-            <h2 className="text-sm font-medium text-text-primary">
+        <ModalBackdrop>
+          <Modal>
+            <ModalTitle>
               {exportDone ? 'Export Complete' : exportError ? 'Export Failed' : 'Exporting...'}
-            </h2>
+            </ModalTitle>
 
             {exportProgress !== null && (
-              <div className="w-full h-2 bg-border rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-accent transition-all duration-300 rounded-full"
-                  style={{ width: `${Math.max(0, Math.min(100, exportProgress))}%` }}
-                />
-              </div>
+              <>
+                <ProgressTrack>
+                  <ProgressFill $pct={exportProgress} />
+                </ProgressTrack>
+                <MonoText>{Math.round(exportProgress)}%</MonoText>
+              </>
             )}
 
-            {exportProgress !== null && (
-              <p className="font-mono text-xs text-text-muted">
-                {Math.round(exportProgress)}%
-              </p>
-            )}
-
-            {exportError && (
-              <p className="text-red-400 text-sm">{exportError}</p>
-            )}
+            {exportError && <ErrorText>{exportError}</ErrorText>}
 
             {exportDone && (
-              <div className="flex flex-col gap-2">
-                <p className="text-text-muted text-xs font-mono break-all">{exportDone}</p>
-                <button
-                  className="px-4 py-2 text-xs font-medium rounded bg-white/10 text-text-primary hover:bg-white/15 transition-colors"
-                  onClick={() => window.electron.showInFolder(exportDone!)}
-                >
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <MonoText style={{ color: '#6b7280', wordBreak: 'break-all' }}>{exportDone}</MonoText>
+                <PrimaryGhost onClick={() => window.electron.showInFolder(exportDone!)}>
                   Show in Finder
-                </button>
+                </PrimaryGhost>
               </div>
             )}
 
             {(exportDone || exportError) && (
-              <button
-                className="px-4 py-2 text-xs rounded bg-white/5 text-text-muted hover:bg-white/10 transition-colors"
-                onClick={() => setShowExportModal(false)}
-              >
-                Close
-              </button>
+              <SecondaryGhost onClick={() => setShowExportModal(false)}>Close</SecondaryGhost>
             )}
-          </div>
-        </div>
+          </Modal>
+        </ModalBackdrop>
       )}
     </>
   )
