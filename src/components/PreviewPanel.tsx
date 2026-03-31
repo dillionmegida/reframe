@@ -96,10 +96,19 @@ export default function PreviewPanel() {
       }
     }
 
-    const observer = new ResizeObserver(update)
+    let frame = 0
+    const scheduleUpdate = () => {
+      if (frame) cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(update)
+    }
+
+    const observer = new ResizeObserver(scheduleUpdate)
     observer.observe(wrapper)
     update()
-    return () => observer.disconnect()
+    return () => {
+      if (frame) cancelAnimationFrame(frame)
+      observer.disconnect()
+    }
   }, [outputAspect])
 
   // Draw the crop region onto the canvas, synchronized with decoded video frames when possible
@@ -108,6 +117,9 @@ export default function PreviewPanel() {
     if (!canvas) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
+
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
 
     let stopped = false
     lastDrawnTimeRef.current = -1
@@ -119,9 +131,14 @@ export default function PreviewPanel() {
       const sz = containerSizeRef.current
       if (sz.w === 0 || sz.h === 0) return
 
-      if (canvas.width !== sz.w || canvas.height !== sz.h) {
-        canvas.width = sz.w
-        canvas.height = sz.h
+      const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
+      const bw = Math.round(sz.w * dpr)
+      const bh = Math.round(sz.h * dpr)
+
+      if (canvas.width !== bw || canvas.height !== bh) {
+        canvas.width = bw
+        canvas.height = bh
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       }
 
       const source = document.getElementById('source-video') as HTMLVideoElement | null

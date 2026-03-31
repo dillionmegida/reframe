@@ -144,7 +144,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (!project) return
 
     const newPast = pushUndo(past, project.keyframes, project.trim, project.slices)
-    const easing = kf.easing ?? 'ease-in'
+    const easing = kf.easing ?? 'ease-in-out'
     const existing = project.keyframes.find(
       (k) => Math.abs(k.timestamp - kf.timestamp) < 0.1
     )
