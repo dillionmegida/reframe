@@ -118,9 +118,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   setCurrentTime: (t) => {
-    const { project } = get()
+    const { project, currentTime } = get()
     if (!project) return
     const clamped = Math.max(project.trim.start, Math.min(project.trim.end, t))
+    if (Math.abs(clamped - currentTime) < 0.001) return
     writeStoredPlayhead(project.id, clamped)
     set({ currentTime: clamped })
   },

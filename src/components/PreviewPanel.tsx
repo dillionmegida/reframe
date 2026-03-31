@@ -60,6 +60,7 @@ export default function PreviewPanel() {
   const [containerSize, setContainerSize] = useState({ w: 0, h: 0 })
   const rafRef = useRef<number>(0)
   const hudRef = useRef<HTMLDivElement>(null)
+  const lastDrawnTimeRef = useRef<number>(-1)
 
   const outputAspect = project.outputWidth / project.outputHeight
 
@@ -132,8 +133,16 @@ export default function PreviewPanel() {
         return
       }
 
+      // Only redraw if currentTime has changed significantly
+      const currentTime = state.currentTime
+      if (Math.abs(currentTime - lastDrawnTimeRef.current) < 0.001) {
+        rafRef.current = requestAnimationFrame(tick)
+        return
+      }
+      lastDrawnTimeRef.current = currentTime
+
       const { videoWidth, videoHeight } = state.project
-      const interp = interpolateAtTime(state.project.keyframes, state.currentTime)
+      const interp = interpolateAtTime(state.project.keyframes, currentTime)
 
       const vidAspect = videoWidth / videoHeight
       const outAspect = state.project.outputWidth / state.project.outputHeight

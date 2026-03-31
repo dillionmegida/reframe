@@ -38,6 +38,8 @@ const PreviewContainer = styled.div`
 const TimelineContainer = styled.div`
   height: 160px;
   flex-shrink: 0;
+  overflow: visible;
+  position: relative;
 `
 
 export default function EditorScreen() {

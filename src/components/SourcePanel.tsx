@@ -169,10 +169,13 @@ export default function SourcePanel() {
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
-    if (Math.abs(video.currentTime - currentTime) > 0.05) {
+    // When not playing, always sync
+    // When playing, only sync if there's a large difference (user clicked timeline)
+    const threshold = isPlaying ? 0.5 : 0.05
+    if (Math.abs(video.currentTime - currentTime) > threshold) {
       video.currentTime = currentTime
     }
-  }, [currentTime])
+  }, [currentTime, isPlaying])
 
   useEffect(() => {
     const video = videoRef.current
@@ -184,7 +187,6 @@ export default function SourcePanel() {
     }
   }, [isPlaying])
 
-  // Playback time sync via rAF for smooth ~60fps updates
   const playbackRafRef = useRef<number>(0)
   useEffect(() => {
     const video = videoRef.current

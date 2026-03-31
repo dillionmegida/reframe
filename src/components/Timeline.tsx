@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import styled from 'styled-components'
 import { useEditorStore } from '../store/editorStore'
 import type { SliceStatus } from '../types'
@@ -28,11 +29,7 @@ const Container = styled.div`
     background-repeat: repeat;
     opacity: 0.4;
     pointer-events: none;
-  }
-
-  > * {
-    position: relative;
-    z-index: 1;
+    z-index: 0;
   }
 `
 
@@ -43,7 +40,9 @@ const ScrollArea = styled.div`
   overflow-x: auto;
   overflow-y: hidden;
   position: relative;
+  z-index: 1;
   cursor: pointer;
+  pointer-events: auto;
 `
 
 const Filmstrip = styled.div<{ $width: number }>`
@@ -275,6 +274,8 @@ const Controls = styled.div`
   align-items: center;
   border-top: 1px solid rgba(42, 42, 42, 0.5);
   padding: 0.5rem;
+  position: relative;
+  z-index: 1;
 `
 
 const ZoomRow = styled.div`
@@ -304,7 +305,7 @@ const ContextMenu = styled.div`
   border-radius: 0.5rem;
   box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.6);
   padding: 0.25rem 0;
-  z-index: 50;
+  z-index: 9999;
   min-width: 160px;
 `
 
@@ -341,6 +342,7 @@ export default function Timeline() {
   const setSliceStatus = useEditorStore((s) => s.setSliceStatus)
   const deleteSlice = useEditorStore((s) => s.deleteSlice)
 
+  const containerRef = useRef<HTMLDivElement>(null)
   const filmstripRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const thumbVideoRef = useRef<HTMLVideoElement>(null)
@@ -391,9 +393,17 @@ export default function Timeline() {
     return () => sc.removeEventListener('scroll', onScroll)
   }, [])
 
+  const lastAutoScrollTimeRef = useRef(0)
   useEffect(() => {
     const sc = scrollContainerRef.current
     if (!sc || filmstripWidth <= 0) return
+    
+    // Only auto-scroll if currentTime changed significantly (> 0.5s)
+    // to avoid excessive re-renders during playback
+    const timeDiff = Math.abs(currentTime - lastAutoScrollTimeRef.current)
+    if (timeDiff < 0.5) return
+    
+    lastAutoScrollTimeRef.current = currentTime
     const playheadX = (currentTime / duration) * filmstripWidth
     const sl = sc.scrollLeft
     const sr = sl + sc.clientWidth
@@ -592,7 +602,7 @@ export default function Timeline() {
   }, [duration, tickInterval])
 
   return (
-    <Container>
+    <Container ref={containerRef}>
       <video ref={thumbVideoRef} style={{ display: 'none' }} muted playsInline />
 
       <ScrollArea ref={scrollContainerRef} onMouseDown={handleFilmstripMouseDown}>
@@ -744,10 +754,11 @@ export default function Timeline() {
         <KeyframeInspector
           keyframeId={selectedKeyframeId}
           anchorX={timeToX(project.keyframes.find((k) => k.id === selectedKeyframeId)?.timestamp ?? 0) - scrollLeft}
+          containerRef={containerRef}
         />
       )}
 
-      {contextMenu && (
+      {contextMenu && createPortal(
         <ContextMenu style={{ left: contextMenu.x, top: contextMenu.y }}>
           <ContextItem
             onClick={() => {
@@ -765,7 +776,8 @@ export default function Timeline() {
           >
             Clone to -1s
           </ContextItem>
-        </ContextMenu>
+        </ContextMenu>,
+        document.body
       )}
     </Container>
   )

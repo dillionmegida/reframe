@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import styled from 'styled-components'
 import { useEditorStore } from '../store/editorStore'
 import type { EasingType } from '../types'
@@ -13,6 +14,7 @@ function formatTimestamp(s: number): string {
 interface Props {
   keyframeId: string
   anchorX: number
+  containerRef?: React.RefObject<HTMLDivElement | null>
 }
 
 const easingOptions: { label: string; value: EasingType }[] = [
@@ -23,8 +25,8 @@ const easingOptions: { label: string; value: EasingType }[] = [
 ]
 
 const Popover = styled.div`
-  position: absolute;
-  z-index: 50;
+  position: fixed;
+  z-index: 9999;
   background: #161616;
   border: 1px solid #2a2a2a;
   border-radius: 0.5rem;
@@ -101,7 +103,7 @@ const ActionButton = styled.button<{ $danger?: boolean }>`
   }
 `
 
-export default function KeyframeInspector({ keyframeId, anchorX }: Props) {
+export default function KeyframeInspector({ keyframeId, anchorX, containerRef }: Props) {
   const project = useEditorStore((s) => s.project!)
   const selectKeyframe = useEditorStore((s) => s.selectKeyframe)
   const updateKeyframe = useEditorStore((s) => s.updateKeyframe)
@@ -133,14 +135,17 @@ export default function KeyframeInspector({ keyframeId, anchorX }: Props) {
   const kf = project.keyframes.find((k) => k.id === keyframeId)
   if (!kf) return null
 
-  // Clamp popover position
+  // Compute fixed position from container bounding rect
   const popoverWidth = 260
-  const left = Math.max(8, Math.min(anchorX - popoverWidth / 2, window.innerWidth - popoverWidth - 8))
+  const containerRect = containerRef?.current?.getBoundingClientRect()
+  const bottomY = containerRect ? containerRect.top - 8 : 100
+  const baseLeft = containerRect ? containerRect.left + anchorX : anchorX
+  const left = Math.max(8, Math.min(baseLeft - popoverWidth / 2, window.innerWidth - popoverWidth - 8))
 
-  return (
+  return createPortal(
     <Popover
       ref={popoverRef}
-      style={{ bottom: '100%', left, width: popoverWidth, marginBottom: 8 }}
+      style={{ bottom: window.innerHeight - bottomY, left, width: popoverWidth }}
     >
       <Row>
         <Label>Time</Label>
@@ -186,6 +191,7 @@ export default function KeyframeInspector({ keyframeId, anchorX }: Props) {
           Delete
         </ActionButton>
       </Actions>
-    </Popover>
+    </Popover>,
+    document.body
   )
 }
