@@ -348,9 +348,9 @@ export default function SourcePanel() {
   const finalCropX = videoRendered.x + displayX * (videoRendered.w - cropRenderW)
   const finalCropY = videoRendered.y + displayY * (videoRendered.h - cropRenderH)
 
-  // Corner resize handles — scale about center while preserving aspect
+  // Corner resize handles — anchor at the opposite corner instead of center
   const handleResizeMouseDown = useCallback(
-    (e: React.MouseEvent) => {
+    (e: React.MouseEvent, dir: 'tl' | 'tr' | 'bl' | 'br') => {
       e.stopPropagation()
       e.preventDefault()
 
@@ -358,13 +358,8 @@ export default function SourcePanel() {
 
       if (videoRendered.w === 0 || videoRendered.h === 0) return
 
-      const startW = cropRenderW
-      const startH = cropRenderH
-      const centerX = finalCropX + startW / 2
-      const centerY = finalCropY + startH / 2
-
-      const maxW = outputAspect < videoAspect ? videoRendered.h * outputAspect : videoRendered.w
-      const maxH = outputAspect < videoAspect ? videoRendered.h : videoRendered.w / outputAspect
+      const maxWGlobal = outputAspect < videoAspect ? videoRendered.h * outputAspect : videoRendered.w
+      const maxHGlobal = outputAspect < videoAspect ? videoRendered.h : videoRendered.w / outputAspect
 
       const minScale = 1
       const maxScale = 4
@@ -376,14 +371,39 @@ export default function SourcePanel() {
       const containerRect = containerRef.current?.getBoundingClientRect()
       if (!containerRect) return
 
+      // Anchor is the opposite corner from the handle being dragged
+      const anchorX = dir.includes('l') ? finalCropX + cropRenderW : finalCropX
+      const anchorY = dir.includes('t') ? finalCropY + cropRenderH : finalCropY
+
+      const maxWidthFromAnchor = dir.includes('l')
+        ? anchorX - videoRendered.x
+        : videoRendered.x + videoRendered.w - anchorX
+      const maxHeightFromAnchor = dir.includes('t')
+        ? anchorY - videoRendered.y
+        : videoRendered.y + videoRendered.h - anchorY
+
       const onMouseMove = (ev: MouseEvent) => {
         const pointerX = ev.clientX - containerRect.left
         const pointerY = ev.clientY - containerRect.top
 
-        let newW = Math.abs(pointerX - centerX) * 2
-        let newH = newW / outputAspect
+        const absDx = Math.abs(pointerX - anchorX)
+        const absDy = Math.abs(pointerY - anchorY)
 
-        // Clamp to fit inside videoRendered bounds
+        let newW: number
+        let newH: number
+
+        if (absDx <= absDy * outputAspect) {
+          newW = absDx
+          newH = newW / outputAspect
+        } else {
+          newH = absDy
+          newW = newH * outputAspect
+        }
+
+        // Clamp to available space from anchor and global bounds
+        const maxW = Math.min(maxWidthFromAnchor, maxWGlobal)
+        const maxH = Math.min(maxHeightFromAnchor, maxHGlobal)
+
         if (newW > maxW) {
           newW = maxW
           newH = newW / outputAspect
@@ -393,7 +413,6 @@ export default function SourcePanel() {
           newW = newH * outputAspect
         }
 
-        // Clamp scale limits via size
         if (newW < minW) {
           newW = minW
           newH = newW / outputAspect
@@ -403,7 +422,6 @@ export default function SourcePanel() {
           newW = newH * outputAspect
         }
 
-        // Derive scale from width/height depending on limiting dimension
         let newScale: number
         if (outputAspect < videoAspect) {
           newScale = videoRendered.h / newH
@@ -412,16 +430,18 @@ export default function SourcePanel() {
         }
         newScale = Math.max(minScale, Math.min(maxScale, newScale))
 
-        // Recompute x,y so crop remains centered
-        const newX = (centerX - videoRendered.x - newW / 2) / (videoRendered.w - newW || 1)
-        const newY = (centerY - videoRendered.y - newH / 2) / (videoRendered.h - newH || 1)
+        const newX = dir.includes('l') ? anchorX - newW : anchorX
+        const newY = dir.includes('t') ? anchorY - newH : anchorY
+
+        const normX = (newX - videoRendered.x) / (videoRendered.w - newW || 1)
+        const normY = (newY - videoRendered.y) / (videoRendered.h - newH || 1)
 
         addOrUpdateKeyframe({
           timestamp: currentTime,
-          x: Math.max(0, Math.min(1, newX)),
-          y: Math.max(0, Math.min(1, newY)),
+          x: Math.max(0, Math.min(1, normX)),
+          y: Math.max(0, Math.min(1, normY)),
           scale: newScale,
-          easing: 'ease-in',
+          easing: 'linear',
         })
       }
 
@@ -493,7 +513,7 @@ export default function SourcePanel() {
           $left={h.left}
           $top={h.top}
           $cursor={h.cursor}
-          onMouseDown={handleResizeMouseDown}
+          onMouseDown={(ev) => handleResizeMouseDown(ev, h.key as 'tl' | 'tr' | 'bl' | 'br')}
         />
       ))}
 
