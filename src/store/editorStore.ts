@@ -118,15 +118,24 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   setCurrentTime: (t) => {
-    const { project, currentTime } = get()
+    const { project, currentTime, isPlaying } = get()
     if (!project) return
     const clamped = Math.max(project.trim.start, Math.min(project.trim.end, t))
     if (Math.abs(clamped - currentTime) < 0.001) return
-    writeStoredPlayhead(project.id, clamped)
+    // Avoid per-frame storage writes while playing; persist on pause instead
+    if (!isPlaying) {
+      writeStoredPlayhead(project.id, clamped)
+    }
     set({ currentTime: clamped })
   },
 
-  setPlaying: (v) => set({ isPlaying: v }),
+  setPlaying: (v) => {
+    const state = get()
+    set({ isPlaying: v })
+    if (!v && state.project) {
+      writeStoredPlayhead(state.project.id, state.currentTime)
+    }
+  },
 
   selectKeyframe: (id) => set({ selectedKeyframeId: id }),
 

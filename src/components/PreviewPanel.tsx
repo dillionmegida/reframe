@@ -59,6 +59,7 @@ export default function PreviewPanel() {
   const containerSizeRef = useRef({ w: 0, h: 0 })
   const [containerSize, setContainerSize] = useState({ w: 0, h: 0 })
   const rafRef = useRef<number>(0)
+  const vfcRef = useRef<number>(0)
   const hudRef = useRef<HTMLDivElement>(null)
   const lastDrawnTimeRef = useRef<number>(-1)
 
@@ -101,53 +102,40 @@ export default function PreviewPanel() {
     return () => observer.disconnect()
   }, [outputAspect])
 
-  // rAF loop: draw the crop region from the source video onto the canvas
+  // Draw the crop region onto the canvas, synchronized with decoded video frames when possible
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    const tick = () => {
+    let stopped = false
+    lastDrawnTimeRef.current = -1
+
+    const drawAtTime = (t: number) => {
       const state = useEditorStore.getState()
-      if (!state.project) {
-        rafRef.current = requestAnimationFrame(tick)
-        return
-      }
+      if (!state.project) return
 
       const sz = containerSizeRef.current
-      if (sz.w === 0 || sz.h === 0) {
-        rafRef.current = requestAnimationFrame(tick)
-        return
-      }
+      if (sz.w === 0 || sz.h === 0) return
 
-      // Ensure canvas backing size matches display size
       if (canvas.width !== sz.w || canvas.height !== sz.h) {
         canvas.width = sz.w
         canvas.height = sz.h
       }
 
       const source = document.getElementById('source-video') as HTMLVideoElement | null
-      if (!source || source.readyState < 2) {
-        rafRef.current = requestAnimationFrame(tick)
-        return
-      }
+      if (!source || source.readyState < 2) return
 
-      // Only redraw if currentTime has changed significantly
-      const currentTime = state.currentTime
-      if (Math.abs(currentTime - lastDrawnTimeRef.current) < 0.001) {
-        rafRef.current = requestAnimationFrame(tick)
-        return
-      }
-      lastDrawnTimeRef.current = currentTime
+      if (Math.abs(t - lastDrawnTimeRef.current) < 0.0005) return
+      lastDrawnTimeRef.current = t
 
       const { videoWidth, videoHeight } = state.project
-      const interp = interpolateAtTime(state.project.keyframes, currentTime)
+      const interp = interpolateAtTime(state.project.keyframes, t)
 
       const vidAspect = videoWidth / videoHeight
       const outAspect = state.project.outputWidth / state.project.outputHeight
 
-      // Compute crop region as fraction of source
       let cropFracW: number
       let cropFracH: number
       if (outAspect < vidAspect) {
@@ -160,26 +148,54 @@ export default function PreviewPanel() {
       cropFracW = Math.min(1, Math.max(0.0001, cropFracW))
       cropFracH = Math.min(1, Math.max(0.0001, cropFracH))
 
-      // Crop in source pixels
       const cropW = cropFracW * videoWidth
       const cropH = cropFracH * videoHeight
       const cropX = (videoWidth - cropW) * Math.max(0, Math.min(1, interp.x))
       const cropY = (videoHeight - cropH) * Math.max(0, Math.min(1, interp.y))
 
-      // Draw the crop region scaled to fill the canvas
       ctx.clearRect(0, 0, sz.w, sz.h)
       ctx.drawImage(source, cropX, cropY, cropW, cropH, 0, 0, sz.w, sz.h)
 
-      // Update HUD
       if (hudRef.current) {
         hudRef.current.textContent = `${interp.scale.toFixed(1)}×`
       }
+    }
 
+    const startRaf = () => {
+      const tick = () => {
+        if (stopped) return
+        const state = useEditorStore.getState()
+        drawAtTime(state.currentTime)
+        rafRef.current = requestAnimationFrame(tick)
+      }
       rafRef.current = requestAnimationFrame(tick)
     }
 
-    rafRef.current = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(rafRef.current)
+    const startVfc = (video: HTMLVideoElement) => {
+      const onFrame = (_now: number, meta: { mediaTime: number }) => {
+        if (stopped) return
+        drawAtTime(meta.mediaTime)
+        vfcRef.current = (video as any).requestVideoFrameCallback(onFrame)
+      }
+      vfcRef.current = (video as any).requestVideoFrameCallback(onFrame)
+    }
+
+    const source = document.getElementById('source-video') as HTMLVideoElement | null
+    const supportsVfc = !!source && typeof (source as any).requestVideoFrameCallback === 'function'
+
+    if (supportsVfc && source) {
+      startVfc(source)
+    } else {
+      startRaf()
+    }
+
+    return () => {
+      stopped = true
+      cancelAnimationFrame(rafRef.current)
+      if (source && typeof (source as any).cancelVideoFrameCallback === 'function') {
+        (source as any).cancelVideoFrameCallback(vfcRef.current)
+      }
+    }
   }, [project.videoPath])
 
   return (

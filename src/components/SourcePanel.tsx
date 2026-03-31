@@ -37,10 +37,7 @@ const CropOverlay = styled.div<{
   cursor: ${({ $isDragging }) => ($isDragging ? 'grabbing' : 'grab')};
   z-index: 10;
   pointer-events: auto;
-  transition: ${({ $isDragging, $isPlaying, $isResizing, $disableTransition }) =>
-    $disableTransition || $isDragging || $isPlaying || $isResizing
-      ? 'none'
-      : 'left 0.15s ease-out, top 0.15s ease-out, width 0.15s ease-out, height 0.15s ease-out'};
+  transition: none;
   will-change: left, top, width, height;
 `
 
@@ -188,17 +185,28 @@ export default function SourcePanel() {
   }, [isPlaying])
 
   const playbackRafRef = useRef<number>(0)
+  const playbackVfcRef = useRef<number>(0)
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
 
-    if (!isPlaying) {
+    let stopped = false
+
+    const endPlayback = () => {
+      stopped = true
       cancelAnimationFrame(playbackRafRef.current)
+      if (typeof (video as any).cancelVideoFrameCallback === 'function') {
+        (video as any).cancelVideoFrameCallback(playbackVfcRef.current)
+      }
+    }
+
+    if (!isPlaying) {
+      endPlayback()
       return
     }
 
-    const tick = () => {
-      if (!video || video.paused) return
+    const tickRaf = () => {
+      if (stopped || !video || video.paused) return
       const t = video.currentTime
       if (t >= project.trim.end) {
         video.pause()
@@ -207,11 +215,31 @@ export default function SourcePanel() {
         return
       }
       setCurrentTime(t)
-      playbackRafRef.current = requestAnimationFrame(tick)
+      playbackRafRef.current = requestAnimationFrame(tickRaf)
     }
 
-    playbackRafRef.current = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(playbackRafRef.current)
+    const tickVfc = (_now: number, meta: { mediaTime: number }) => {
+      if (stopped) return
+      const t = meta.mediaTime
+      if (t >= project.trim.end) {
+        video.pause()
+        setPlaying(false)
+        setCurrentTime(project.trim.end)
+        return
+      }
+      setCurrentTime(t)
+      playbackVfcRef.current = (video as any).requestVideoFrameCallback(tickVfc)
+    }
+
+    const supportsVfc = typeof (video as any).requestVideoFrameCallback === 'function'
+
+    if (supportsVfc) {
+      playbackVfcRef.current = (video as any).requestVideoFrameCallback(tickVfc)
+    } else {
+      playbackRafRef.current = requestAnimationFrame(tickRaf)
+    }
+
+    return endPlayback
   }, [isPlaying, project.trim.end, setCurrentTime, setPlaying])
 
   // Crop rectangle dimensions in rendered pixels
