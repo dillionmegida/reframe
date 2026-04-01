@@ -163,7 +163,7 @@ function muxCaptureWithAudio(
         '-shortest',
       ])
       .output(outputPath)
-      .on('end', resolve)
+      .on('end', () => resolve())
       .on('error', (err: Error) => reject(err))
       .run()
   })
@@ -289,7 +289,7 @@ export async function exportVideo(
   const exportSlices = slices && slices.length > 0 ? slices : undefined
 
   const results: { sliceId: string; path: string }[] = []
-  const fps = 30
+  const fps = project.videoFps || 30
 
   // Resolution label for filename e.g. "1214x2160"
   const resLabel = `${project.outputWidth}x${project.outputHeight}`

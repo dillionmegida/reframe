@@ -38,6 +38,7 @@ export interface VideoEntry {
   videoDuration: number
   videoWidth: number
   videoHeight: number
+  videoFps: number
   outputRatio: AspectRatio
   outputWidth: number
   outputHeight: number

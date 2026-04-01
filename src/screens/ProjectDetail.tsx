@@ -278,6 +278,7 @@ export default function ProjectDetail({ projectId }: { projectId: string }) {
           videoDuration: meta.duration,
           videoWidth: meta.width,
           videoHeight: meta.height,
+          videoFps: meta.fps,
           outputRatio,
           outputWidth,
           outputHeight,
