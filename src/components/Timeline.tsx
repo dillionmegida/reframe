@@ -350,9 +350,12 @@ export default function Timeline() {
   const [viewportWidth, setViewportWidth] = useState(0)
   const [scrollLeft, setScrollLeft] = useState(0)
   const [zoom, setZoom] = useState(() => {
-    const stored = typeof window !== 'undefined' ? window.localStorage.getItem('timelineZoom') : null
-    const parsed = stored ? parseFloat(stored) : NaN
-    return Number.isFinite(parsed) ? parsed : 1
+    if (typeof window !== 'undefined' && project.id) {
+      const stored = window.localStorage.getItem(`timelineZoom.${project.id}`)
+      const parsed = stored ? parseFloat(stored) : NaN
+      return Number.isFinite(parsed) ? parsed : 1
+    }
+    return 1
   })
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; kfId: string } | null>(null)
 
@@ -379,10 +382,10 @@ export default function Timeline() {
   }, [])
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem('timelineZoom', zoom.toString())
+    if (typeof window !== 'undefined' && project.id) {
+      window.localStorage.setItem(`timelineZoom.${project.id}`, zoom.toString())
     }
-  }, [zoom])
+  }, [zoom, project.id])
 
   useEffect(() => {
     const sc = scrollContainerRef.current
