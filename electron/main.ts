@@ -216,6 +216,19 @@ ipcMain.handle('ensure-directory', async (_event, dirPath: string) => {
   }
 })
 
+ipcMain.handle('rename-file', async (_event, { oldPath, newPath }: { oldPath: string; newPath: string }) => {
+  try {
+    // Check if destination already exists
+    if (fs.existsSync(newPath)) {
+      throw new Error('A file with that name already exists')
+    }
+    fs.renameSync(oldPath, newPath)
+    return { success: true, newPath }
+  } catch (err: any) {
+    throw new Error(err.message || 'Failed to rename file')
+  }
+})
+
 ipcMain.handle('remove-directory', async (_event, dirPath: string) => {
   if (fs.existsSync(dirPath)) {
     fs.rmSync(dirPath, { recursive: true, force: true })

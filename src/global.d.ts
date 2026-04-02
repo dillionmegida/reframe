@@ -9,6 +9,7 @@ interface ElectronAPI {
     duration: number
     fps: number
   }>
+  renameFile: (oldPath: string, newPath: string) => Promise<{ success: boolean; newPath: string }>
   exportVideo: (args: any) => Promise<string | null>
   onExportProgress: (cb: (payload: any) => void) => void
   onExportDone: (cb: (payload: any) => void) => void
