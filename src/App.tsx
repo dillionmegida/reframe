@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import styled from 'styled-components'
 import { useAppStore } from './store/appStore'
 import { useEditorStore } from './store/editorStore'
@@ -109,6 +109,11 @@ export default function App() {
   const loadEditorProject = useEditorStore((s) => s.loadProject)
   const getVideo = useAppStore((s) => s.getVideo)
 
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const saved = localStorage.getItem('reframe.sidebarWidth')
+    return saved ? parseInt(saved, 10) : 200
+  })
+
   useEffect(() => {
     init()
   }, [init])
@@ -145,7 +150,7 @@ export default function App() {
 
   return (
     <MainLayout>
-      <Sidebar />
+      <Sidebar width={sidebarWidth} onWidthChange={setSidebarWidth} />
       <MainContent>
         {route.view === 'project' ? (
           <ProjectDetail projectId={route.projectId} />

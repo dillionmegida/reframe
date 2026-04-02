@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import styled from 'styled-components'
 import { useAppStore } from '../store/appStore'
 
-const Wrapper = styled.div`
-  width: 200px;
+const Wrapper = styled.div<{ $width: number }>`
+  width: ${(p) => p.$width}px;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -26,6 +26,22 @@ const Wrapper = styled.div`
   > * {
     position: relative;
     z-index: 1;
+  }
+`
+
+const ResizeHandle = styled.div`
+  position: absolute;
+  right: -4px;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  z-index: 10;
+  background: transparent;
+  transition: background-color 0.2s;
+
+  &:hover {
+    background: rgba(249, 115, 22, 0.3);
   }
 `
 
@@ -183,7 +199,7 @@ const ContextItem = styled.button`
   }
 `
 
-export default function Sidebar() {
+export default function Sidebar({ width, onWidthChange }: { width: number; onWidthChange: (width: number) => void }) {
   const projects = useAppStore((s) => s.projects)
   const route = useAppStore((s) => s.route)
   const navigate = useAppStore((s) => s.navigate)
@@ -192,6 +208,40 @@ export default function Sidebar() {
   const [showNew, setShowNew] = useState(false)
   const [newName, setNewName] = useState('')
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; id: string } | null>(null)
+  const [isResizing, setIsResizing] = useState(false)
+  const widthRef = useRef(width)
+
+  useEffect(() => {
+    widthRef.current = width
+  }, [width])
+
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    setIsResizing(true)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    const startX = e.clientX
+    const startWidth = widthRef.current
+
+    const handleMouseMove = (ev: MouseEvent) => {
+      const delta = ev.clientX - startX
+      const newWidth = Math.max(120, Math.min(400, startWidth + delta))
+      onWidthChange(newWidth)
+      widthRef.current = newWidth
+    }
+
+    const handleMouseUp = () => {
+      setIsResizing(false)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      localStorage.setItem('reframe.sidebarWidth', String(widthRef.current))
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+  }, [onWidthChange])
 
   const activeProjectId = route.view !== 'projects' ? route.projectId : null
 
@@ -205,10 +255,9 @@ export default function Sidebar() {
   const sorted = [...projects].sort((a, b) => b.createdAt - a.createdAt)
 
   return (
-    <Wrapper>
+    <Wrapper $width={width}>
       <Header style={{ WebkitAppRegion: 'drag' } as any}>
         <div style={{ width: 52 }} />
-        <Title>Projects</Title>
         <Spacer />
         <IconButton onClick={() => setShowNew(true)} style={{ WebkitAppRegion: 'no-drag' } as any} title="New project">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -217,6 +266,8 @@ export default function Sidebar() {
           </svg>
         </IconButton>
       </Header>
+
+      <ResizeHandle onMouseDown={handleResizeStart} />
 
       {showNew && (
         <NewInputContainer>

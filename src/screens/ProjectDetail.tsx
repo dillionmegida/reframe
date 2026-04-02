@@ -890,7 +890,6 @@ export default function ProjectDetail({ projectId }: { projectId: string }) {
                         {v.videoWidth}x{v.videoHeight} &middot; {Math.round(v.videoDuration)}s &middot; {v.outputRatio}
                       </VideoMeta>
                     </VideoInfo>
-                    <EditLabel>Edit</EditLabel>
                   </VideoButton>
                 )
               })}
