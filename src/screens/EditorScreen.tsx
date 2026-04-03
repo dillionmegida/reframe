@@ -2,6 +2,7 @@ import { useEffect, useCallback } from 'react'
 import styled from 'styled-components'
 import { useEditorStore } from '../store/editorStore'
 import { useAppStore } from '../store/appStore'
+import { ExportProvider, useExport } from '../contexts/ExportContext'
 import SourcePanel from '../components/SourcePanel'
 import PreviewPanel from '../components/PreviewPanel'
 import Timeline from '../components/Timeline'
@@ -42,7 +43,93 @@ const TimelineContainer = styled.div`
   position: relative;
 `
 
-export default function EditorScreen() {
+const ModalBackdrop = styled.div`
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+`
+
+const Modal = styled.div`
+  width: 380px;
+  background: #161616;
+  border: 1px solid #2a2a2a;
+  border-radius: 0.75rem;
+  padding: 1.5rem;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+`
+
+const ModalTitle = styled.h2`
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #e5e5e5;
+`
+
+const ProgressTrack = styled.div`
+  width: 100%;
+  height: 0.5rem;
+  background: #2a2a2a;
+  border-radius: 9999px;
+  overflow: hidden;
+`
+
+const ProgressFill = styled.div<{ $pct: number }>`
+  height: 100%;
+  background: #f97316;
+  width: ${(p) => Math.max(0, Math.min(100, p.$pct))}%;
+  transition: width 0.3s ease;
+  border-radius: 9999px;
+`
+
+const MonoText = styled.p`
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.75rem;
+  color: #6b7280;
+`
+
+const ErrorText = styled.p`
+  font-size: 0.875rem;
+  color: #f87171;
+`
+
+const PrimaryGhost = styled.button`
+  padding: 0.6rem 1rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 0.375rem;
+  border: none;
+  background: rgba(255, 255, 255, 0.05);
+  color: #e5e5e5;
+  cursor: pointer;
+  transition: background-color 0.2s;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
+`
+
+const SecondaryGhost = styled.button`
+  padding: 0.6rem 1rem;
+  font-size: 0.75rem;
+  border-radius: 0.375rem;
+  border: none;
+  background: rgba(255, 255, 255, 0.05);
+  color: #6b7280;
+  cursor: pointer;
+  transition: background-color 0.2s;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
+`
+
+function EditorContent() {
   const project = useEditorStore((s) => s.project)
   const isPlaying = useEditorStore((s) => s.isPlaying)
   const currentTime = useEditorStore((s) => s.currentTime)
@@ -60,6 +147,8 @@ export default function EditorScreen() {
   const undo = useEditorStore((s) => s.undo)
   const redo = useEditorStore((s) => s.redo)
   const updateVideo = useAppStore((s) => s.updateVideo)
+  
+  const { showExportModal, setShowExportModal, sliceProgress, exportComplete, exportError, exportingSlices, isExporting, cancelExport } = useExport()
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -210,6 +299,83 @@ export default function EditorScreen() {
       <TimelineContainer>
         <Timeline />
       </TimelineContainer>
+      
+      {showExportModal && (
+        <ModalBackdrop>
+          <Modal>
+            <ModalTitle>
+              {exportComplete ? 'Export Complete' : exportError ? 'Export Failed' : 
+               exportingSlices.length === 1 ? 'Exporting Slice...' : `Exporting ${exportingSlices.length} Slices...`}
+            </ModalTitle>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              {exportingSlices.map((slice: any, idx: number) => {
+                const state = sliceProgress[slice.id]
+                const pct = Math.round(state?.progress ?? 0)
+                const isDone = state?.state === 'done'
+                const isError = state?.state === 'error'
+
+                return (
+                  <div
+                    key={slice.id}
+                    style={{
+                      padding: '0.75rem 0.75rem 0.5rem',
+                      border: '1px solid #2a2a2a',
+                      borderRadius: '0.5rem',
+                      background: 'rgba(255, 255, 255, 0.02)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.35rem',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <MonoText style={{ color: '#e5e5e5' }}>Slice {idx + 1}</MonoText>
+                      <MonoText style={{ color: isDone ? '#10b981' : isError ? '#f87171' : '#6b7280' }}>
+                        {isDone ? 'Completed' : isError ? 'Failed' : `${pct}%`}
+                      </MonoText>
+                    </div>
+
+                    {!isDone && !isError && (
+                      <ProgressTrack>
+                        <ProgressFill $pct={pct} />
+                      </ProgressTrack>
+                    )}
+
+                    {isDone && state?.path && (
+                      <PrimaryGhost onClick={() => window.electron.showInFolder(state.path!)}>
+                        Show file
+                      </PrimaryGhost>
+                    )}
+
+                    {isError && state?.error && <ErrorText>{state.error}</ErrorText>}
+                  </div>
+                )
+              })}
+            </div>
+
+            {exportError && <ErrorText>{exportError}</ErrorText>}
+
+            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+              {isExporting && (
+                <SecondaryGhost onClick={cancelExport}>
+                  Cancel
+                </SecondaryGhost>
+              )}
+              {(exportComplete || exportError) && (
+                <SecondaryGhost onClick={() => setShowExportModal(false)}>Close</SecondaryGhost>
+              )}
+            </div>
+          </Modal>
+        </ModalBackdrop>
+      )}
     </Container>
+  )
+}
+
+export default function EditorScreen() {
+  return (
+    <ExportProvider>
+      <EditorContent />
+    </ExportProvider>
   )
 }

@@ -2,6 +2,8 @@ import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import styled from 'styled-components'
 import { useEditorStore } from '../store/editorStore'
+import { useAppStore } from '../store/appStore'
+import { useExport } from '../contexts/ExportContext'
 import type { SliceStatus } from '../types'
 import Playback from './Playback'
 import KeyframeInspector from './KeyframeInspector'
@@ -155,7 +157,7 @@ const TrimHandleInner = styled.div`
 const SliceWrapper = styled.div<{ $left: number; $width: number }>`
   position: absolute;
   top: 0;
-  height: 100%;
+  height: 20px;
   left: ${(p) => p.$left}px;
   width: ${(p) => p.$width}px;
   z-index: 15;
@@ -341,6 +343,10 @@ export default function Timeline() {
   const updateSlice = useEditorStore((s) => s.updateSlice)
   const setSliceStatus = useEditorStore((s) => s.setSliceStatus)
   const deleteSlice = useEditorStore((s) => s.deleteSlice)
+  const basePath = useAppStore((s) => s.basePath)
+  const route = useAppStore((s) => s.route)
+  const getProject = useAppStore((s) => s.getProject)
+  const { startExport } = useExport()
 
   const containerRef = useRef<HTMLDivElement>(null)
   const filmstripRef = useRef<HTMLDivElement>(null)
@@ -586,6 +592,28 @@ export default function Timeline() {
     setContextMenu({ x: e.clientX, y: e.clientY, kfId })
   }, [])
 
+  const handleExportSlice = useCallback(async (sliceId: string) => {
+    console.log('Export slice clicked:', sliceId)
+    
+    const slice = project.slices.find((s) => s.id === sliceId)
+    if (!slice || slice.status !== 'keep' || !basePath) {
+      console.error('Slice not found, not keep status, or no basePath:', { sliceId, slice, basePath })
+      return
+    }
+
+    const reframeProject = route.view === 'editor' ? getProject(route.projectId) : null
+    const projectName = reframeProject?.name || 'unknown-project'
+
+    console.log('Exporting slice:', { sliceId, slice, projectName, basePath })
+
+    try {
+      await startExport([slice], project, basePath, projectName, project.id)
+      console.log('Export completed successfully')
+    } catch (err: any) {
+      console.error('Export failed:', err)
+    }
+  }, [project, basePath, route, getProject, startExport])
+
   useEffect(() => {
     const handler = () => setContextMenu(null)
     if (contextMenu) {
@@ -680,6 +708,17 @@ export default function Timeline() {
                           {status === 'keep' ? 'Keep' : 'Hide'}
                         </SliceActionButton>
                       ))}
+                      {slice.status === 'keep' && (
+                        <SliceActionButton
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleExportSlice(slice.id)
+                          }}
+                        >
+                          Export
+                        </SliceActionButton>
+                      )}
                       <SliceActionButton
                         $danger
                         onMouseDown={(e) => e.stopPropagation()}
