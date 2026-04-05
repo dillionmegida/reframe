@@ -36,9 +36,27 @@ export function interpolateAtTime(
   const rawP = (t - kfA.timestamp) / duration
   const p = applyEasing(Math.max(0, Math.min(1, rawP)), kfB.easing)
 
-  // Hermite (Catmull-Rom style) smoothing for smoother motion
-  const kfPrev = keyframes[i - 1] ?? kfA
-  const kfNext = keyframes[i + 2] ?? kfB
+  // Hermite (Catmull-Rom style) smoothing for smoother motion.
+  // At boundaries, mirror the adjacent keyframe to get a natural non-zero tangent
+  // instead of clamping (which produces a flat/jerky start or end).
+  const kfPrev = i > 0
+    ? keyframes[i - 1]
+    : {
+        ...kfA,
+        timestamp: kfA.timestamp - (kfB.timestamp - kfA.timestamp),
+        x: 2 * kfA.x - kfB.x,
+        y: 2 * kfA.y - kfB.y,
+        scale: 2 * kfA.scale - kfB.scale,
+      }
+  const kfNext = i + 2 < keyframes.length
+    ? keyframes[i + 2]
+    : {
+        ...kfB,
+        timestamp: kfB.timestamp + (kfB.timestamp - kfA.timestamp),
+        x: 2 * kfB.x - kfA.x,
+        y: 2 * kfB.y - kfA.y,
+        scale: 2 * kfB.scale - kfA.scale,
+      }
 
   const t0 = kfPrev.timestamp
   const t1 = kfA.timestamp

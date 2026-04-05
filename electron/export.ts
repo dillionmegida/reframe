@@ -88,13 +88,16 @@ function buildSliceKeyframes(
     easing: 'linear',
   }
 
+  // Preserve the easing of the segment that contains sliceEnd so the motion
+  // curve at the clip boundary matches the original (not forced to linear).
+  const nextKfAfterEnd = sorted.find((kf) => kf.timestamp > sliceEnd)
   const endKf: Keyframe = {
     id: '__slice_end__',
     timestamp: sliceEnd,
     x: endInterp.x,
     y: endInterp.y,
     scale: endInterp.scale,
-    easing: 'linear',
+    easing: nextKfAfterEnd?.easing ?? 'linear',
   }
 
   const interior = sorted.filter(
@@ -144,16 +147,17 @@ function requestPreviewCapture(
   },
   abortSignal: AbortSignal,
   onProgress?: (pct: number) => void
-): Promise<string> {
+): Promise<{ frameDir: string; frameCount: number }> {
   return new Promise((resolve, reject) => {
     const replyChannel = `capture:reply:${randomUUID()}`
     const progressChannel = `${replyChannel}:progress`
 
-    // Scale timeout to clip duration: min 60s, max 20 minutes
+    // Scale timeout by frame count: allow ~200ms per frame + 60s buffer, max 45 min
     const clipDuration = payload.end - payload.start
+    const frameCount = Math.round(clipDuration * payload.fps)
     const timeoutMs = Math.min(
-      Math.max(60_000, (clipDuration + 30) * 1000),
-      20 * 60 * 1000
+      Math.max(120_000, frameCount * 200 + 60_000),
+      45 * 60 * 1000
     )
 
     const timeout = setTimeout(() => {
@@ -178,8 +182,8 @@ function requestPreviewCapture(
       cleanup()
       if (abortSignal.aborted) return reject(new Error('Export cancelled'))
       if (data?.error) return reject(new Error(data.error))
-      if (!data?.path) return reject(new Error('No capture path returned'))
-      resolve(data.path)
+      if (!data?.frameDir) return reject(new Error('No frame directory returned'))
+      resolve({ frameDir: data.frameDir, frameCount: data.frameCount ?? 0 })
     })
 
     if (onProgress) {
@@ -202,8 +206,8 @@ function requestPreviewCapture(
 // Phase 2: mux (main process, ffmpeg — runs concurrently with other muxes)
 // ---------------------------------------------------------------------------
 
-function muxCaptureWithAudio(
-  capturePath: string,
+function muxFramesWithAudio(
+  frameDir: string,
   sourceVideoPath: string,
   outputPath: string,
   segmentStart: number,
@@ -212,7 +216,8 @@ function muxCaptureWithAudio(
   abortSignal: AbortSignal
 ): { command: ffmpeg.FfmpegCommand; promise: Promise<void> } {
   const command = ffmpeg()
-    .input(capturePath)
+    .input(`${frameDir}/frame_%06d.jpg`)
+    .inputOptions(['-framerate', String(fps)])
     .input(sourceVideoPath)
     .inputOptions([
       '-ss', String(segmentStart),
@@ -224,8 +229,8 @@ function muxCaptureWithAudio(
       '-c:v', 'libx264',
       '-preset', 'veryfast',
       '-crf', '15',
+      '-pix_fmt', 'yuv420p',
       '-r', String(fps),
-      '-vsync', 'cfr',
       '-c:a', 'aac',
       '-b:a', '256k',
       '-movflags', '+faststart',
@@ -314,7 +319,7 @@ async function runPipeline(
 
     try {
       // --- Capture (sequential — renderer can only do one at a time) ---
-      const capturePath = await requestPreviewCapture(
+      const { frameDir, frameCount: _frameCount } = await requestPreviewCapture(
         mainWindow,
         {
           videoPath: project.videoPath,
@@ -335,6 +340,9 @@ async function runPipeline(
         }
       )
 
+      // Register frameDir for cancellation cleanup
+      exportJob.tempDirs.push(frameDir)
+
       if (abortSignal.aborted) {
         throw new Error('Export cancelled')
       }
@@ -343,8 +351,8 @@ async function runPipeline(
       exportJob.state = 'muxing'
 
       // --- Mux (fire-and-forget into the pool; does NOT block the next capture) ---
-      const { command, promise } = muxCaptureWithAudio(
-        capturePath,
+      const { command, promise } = muxFramesWithAudio(
+        frameDir,
         project.videoPath,
         outputPath,
         slice.start,
@@ -357,6 +365,10 @@ async function runPipeline(
 
       const muxPromise = promise
         .then(() => {
+          // Cleanup frame dir after successful mux
+          try {
+            if (fs.existsSync(frameDir)) fs.rmSync(frameDir, { recursive: true, force: true })
+          } catch { /* ignore */ }
           if (abortSignal.aborted) return
           exportJob.state = 'done'
           activeJobs.delete(jobId)
@@ -368,6 +380,10 @@ async function runPipeline(
           })
         })
         .catch((err: Error) => {
+          // Cleanup frame dir on error
+          try {
+            if (fs.existsSync(frameDir)) fs.rmSync(frameDir, { recursive: true, force: true })
+          } catch { /* ignore */ }
           if (abortSignal.aborted) {
             exportJob.state = 'cancelled'
             activeJobs.delete(jobId)

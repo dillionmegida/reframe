@@ -253,6 +253,21 @@ ipcMain.handle('save-temp-blob', async (_event, data: Uint8Array, ext: string) =
   return filePath
 })
 
+// Frame-by-frame capture: create a temp directory to hold JPEG frames
+ipcMain.handle('create-frame-dir', async () => {
+  const dir = path.join(os.tmpdir(), `reframe-frames-${randomUUID()}`)
+  fs.mkdirSync(dir, { recursive: true })
+  return dir
+})
+
+// Frame-by-frame capture: save a single JPEG frame into an existing frame dir
+ipcMain.handle('save-frame', async (_event, data: Uint8Array, dir: string, index: number) => {
+  const name = `frame_${String(index).padStart(6, '0')}.jpg`
+  const filePath = path.join(dir, name)
+  await fs.promises.writeFile(filePath, Buffer.from(data))
+  return filePath
+})
+
 export function requestPreviewCapture(payload: any): Promise<string> {
   return new Promise((resolve, reject) => {
     if (!mainWindow) return reject(new Error('No window'))

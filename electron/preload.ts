@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('electron', {
   respondCapture: (channel: string, data: any) => ipcRenderer.send(channel, data),
   respondCaptureProgress: (channel: string, data: any) => ipcRenderer.send(channel, data),
   saveTempBlob: (data: Uint8Array, ext: string) => ipcRenderer.invoke('save-temp-blob', data, ext),
+  createFrameDir: () => ipcRenderer.invoke('create-frame-dir'),
+  saveFrame: (data: Uint8Array, dir: string, index: number) => ipcRenderer.invoke('save-frame', data, dir, index),
   onExportProgress: (cb: (payload: any) => void) => {
     ipcRenderer.on('export:progress', (_: any, payload: any) => cb(payload))
   },
