@@ -82,6 +82,7 @@ async function handleCapture(payload: any) {
     const frameCount = Math.round((end - start) * fps)
 
     const frameDir: string = await (window as any).electron.createFrameDir()
+    const savePromises: Promise<any>[] = []
 
     for (let i = 0; i < frameCount; i++) {
       const targetTime = start + i * frameDuration
@@ -117,8 +118,11 @@ async function handleCapture(payload: any) {
           0.97
         )
       })
-      const buf = new Uint8Array(await blob.arrayBuffer())
-      await (window as any).electron.saveFrame(buf, frameDir, i)
+      const savePromise = (async () => {
+        const buf = new Uint8Array(await blob.arrayBuffer())
+        await (window as any).electron.saveFrame(buf, frameDir, i)
+      })()
+      savePromises.push(savePromise)
 
       if (progressChannel) {
         const pct = Math.min(99, ((i + 1) / frameCount) * 100)
@@ -129,6 +133,9 @@ async function handleCapture(payload: any) {
     if (progressChannel) {
       ;(window as any).electron.respondCaptureProgress(progressChannel, { progress: 100 })
     }
+
+    // Ensure all frame writes finished before responding
+    await Promise.all(savePromises)
 
     ;(window as any).electron.respondCapture(replyChannel, { frameDir, frameCount })
   } catch (err: any) {
