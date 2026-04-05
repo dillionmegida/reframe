@@ -12,7 +12,7 @@ function formatTime(s: number): string {
   return `${String(m).padStart(2, '0')}:${sec.toFixed(1).padStart(4, '0')}`
 }
 
-type OutputRatio = '9:16' | '4:5' | '1:1'
+type OutputRatio = '9:16' | '4:5' | '1:1' | '16:9'
 
 function computeOutputDimensions(
   sourceWidth: number,
@@ -23,6 +23,7 @@ function computeOutputDimensions(
     '9:16': 9 / 16,
     '4:5': 4 / 5,
     '1:1': 1,
+    '16:9': 16 / 9,
   }
 
   const outAspect = ratioMap[ratio]
@@ -49,6 +50,7 @@ const ratioOptions: { label: string; value: OutputRatio }[] = [
   { label: '9:16', value: '9:16' },
   { label: '4:5', value: '4:5' },
   { label: '1:1', value: '1:1' },
+  { label: '16:9', value: '16:9' },
 ]
 
 const Bar = styled.div`

@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('electron', {
 
   // Export
   exportVideo: (args: any) => ipcRenderer.invoke('export-video', args),
+  cancelExport: (jobId: string, sliceId?: string) => ipcRenderer.invoke('cancel-export', { jobId, sliceId }),
   // Capture support
   onCaptureRequest: (cb: (payload: any) => void) => {
     ipcRenderer.on('capture:request', (_: any, payload: any) => cb(payload))

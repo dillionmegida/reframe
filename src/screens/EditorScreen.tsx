@@ -129,6 +129,28 @@ const SecondaryGhost = styled.button`
   }
 `
 
+const CancelButton = styled.button`
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(248, 113, 113, 0.2);
+  color: #f87171;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: background-color 0.15s, color 0.15s;
+
+  &:hover {
+    background: rgba(248, 113, 113, 0.4);
+    color: #fca5a5;
+  }
+`
+
 function EditorContent() {
   const project = useEditorStore((s) => s.project)
   const isPlaying = useEditorStore((s) => s.isPlaying)
@@ -148,7 +170,7 @@ function EditorContent() {
   const redo = useEditorStore((s) => s.redo)
   const updateVideo = useAppStore((s) => s.updateVideo)
   
-  const { showExportModal, setShowExportModal, sliceProgress, exportComplete, exportError, exportingSlices, isExporting, cancelExport } = useExport()
+  const { showExportModal, setShowExportModal, sliceProgress, exportComplete, exportError, exportingSlices, isExporting, cancelExport, cancelSliceExport } = useExport()
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -330,9 +352,16 @@ function EditorContent() {
                   >
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                       <MonoText style={{ color: '#e5e5e5' }}>Slice {idx + 1}</MonoText>
-                      <MonoText style={{ color: isDone ? '#10b981' : isError ? '#f87171' : '#6b7280' }}>
-                        {isDone ? 'Completed' : isError ? 'Failed' : `${pct}%`}
-                      </MonoText>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <MonoText style={{ color: isDone ? '#10b981' : isError ? '#f87171' : '#6b7280' }}>
+                          {isDone ? 'Completed' : isError ? 'Failed' : `${pct}%`}
+                        </MonoText>
+                        {isExporting && !isDone && !isError && (
+                          <CancelButton onClick={() => cancelSliceExport(slice.id)} title="Cancel export">
+                            ×
+                          </CancelButton>
+                        )}
+                      </div>
                     </div>
 
                     {!isDone && !isError && (

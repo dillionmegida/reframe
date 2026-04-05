@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog, shell, screen } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import { execFile } from 'child_process'
-import { exportVideo } from './export'
+import { exportVideo, cancelExport, cancelExportBySliceId } from './export'
 import { randomUUID } from 'crypto'
 import os from 'os'
 
@@ -195,6 +195,16 @@ ipcMain.handle('export-video', async (_event, args) => {
   } catch (err: any) {
     throw new Error(err.message || 'Export failed')
   }
+})
+
+ipcMain.handle('cancel-export', async (_event, { jobId, sliceId }: { jobId?: string; sliceId?: string }) => {
+  if (jobId) {
+    return cancelExport(jobId)
+  }
+  if (sliceId) {
+    return cancelExportBySliceId(sliceId)
+  }
+  return false
 })
 
 ipcMain.handle('show-in-folder', (_event, filePath: string) => {

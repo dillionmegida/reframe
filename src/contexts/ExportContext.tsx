@@ -19,6 +19,7 @@ interface ExportContextType {
   exportingSlices: any[]
   isExporting: boolean
   cancelExport: () => void
+  cancelSliceExport: (sliceId: string) => Promise<void>
   startExport: (slices: any[], project: any, basePath: string, projectName: string, videoId: string) => Promise<void>
 }
 
@@ -31,15 +32,32 @@ export function ExportProvider({ children }: { children: ReactNode }) {
   const [exportError, setExportError] = useState<string | null>(null)
   const [exportingSlices, setExportingSlices] = useState<any[]>([])
   const [isExporting, setIsExporting] = useState(false)
-  const currentExportPromiseRef = useRef<Promise<void> | null>(null)
+  const jobIdRef = useRef<string>('')
 
   const cancelExport = () => {
     setIsExporting(false)
     setExportError('Export cancelled')
-    // Note: We can't actually cancel the electron process, but we can stop tracking it
+    // Cancel all active jobs
+    if (jobIdRef.current) {
+      window.electron.cancelExport(jobIdRef.current)
+    }
+  }
+
+  const cancelSliceExport = async (sliceId: string) => {
+    const fullJobId = `${jobIdRef.current}-${sliceId}`
+    await window.electron.cancelExport(fullJobId)
+    
+    // Update progress to show cancelled state
+    setSliceProgress((prev) => ({
+      ...prev,
+      [sliceId]: { ...prev[sliceId], state: 'error', error: 'Cancelled' },
+    }))
   }
 
   const startExport = async (slices: any[], project: any, basePath: string, projectName: string, videoId: string) => {
+    const exportJobId = `export-${Date.now()}`
+    jobIdRef.current = exportJobId
+    
     setShowExportModal(true)
     setExportComplete(false)
     setExportError(null)
@@ -90,6 +108,8 @@ export function ExportProvider({ children }: { children: ReactNode }) {
         const next = { ...prev }
         results.forEach(({ sliceId, path }) => {
           const existing = next[sliceId] || { progress: 0, state: 'progress' as const }
+          // Don't override cancelled/error state
+          if (existing.state === 'error') return
           next[sliceId] = { ...existing, progress: 100, state: 'done', path }
         })
         return next
@@ -103,6 +123,7 @@ export function ExportProvider({ children }: { children: ReactNode }) {
         basePath,
         projectName,
         videoId,
+        jobId: exportJobId,
       })
     } catch (err: any) {
       setExportError(err.message || 'Export failed')
@@ -124,6 +145,7 @@ export function ExportProvider({ children }: { children: ReactNode }) {
       exportingSlices,
       isExporting,
       cancelExport,
+      cancelSliceExport,
       startExport
     }}>
       {children}
