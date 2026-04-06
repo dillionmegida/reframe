@@ -153,6 +153,17 @@ ipcMain.handle('get-video-metadata', async (_event, filePath: string) => {
   })
 })
 
+// Helper to format time for filenames (e.g., 50.5s -> "50s" or 125.3s -> "2m5s")
+function formatTimeForFilename(seconds: number): string {
+  const roundedSeconds = Math.round(seconds)
+  if (roundedSeconds < 60) {
+    return `${roundedSeconds}s`
+  }
+  const mins = Math.floor(roundedSeconds / 60)
+  const secs = roundedSeconds % 60
+  return secs > 0 ? `${mins}m${secs}s` : `${mins}m`
+}
+
 ipcMain.handle('export-video', async (_event, args) => {
   if (!mainWindow) return null
   
@@ -181,13 +192,36 @@ ipcMain.handle('export-video', async (_event, args) => {
   const exportsDir = path.join(projectDir, 'exports')
   
   try {
-    // Clear exports directory before export
-    if (fs.existsSync(exportsDir)) {
-      fs.rmSync(exportsDir, { recursive: true, force: true })
-    }
-    fs.mkdirSync(exportsDir, { recursive: true })
+    const isQuickExport = slices && slices.length === 1
     
-    // Generate filename: video-id_slice-1.mp4, video-id_slice-2.mp4, etc.
+    if (isQuickExport) {
+      // Quick export: only remove matching timestamp files
+      fs.mkdirSync(exportsDir, { recursive: true })
+      
+      const slice = slices[0]
+      const startTime = formatTimeForFilename(slice.start)
+      const endTime = formatTimeForFilename(slice.end)
+      const timestampPattern = `${startTime}-to-${endTime}`
+      
+      // Find and remove existing files with matching timestamps
+      if (fs.existsSync(exportsDir)) {
+        const files = fs.readdirSync(exportsDir)
+        for (const file of files) {
+          if (file.includes(timestampPattern)) {
+            const filePath = path.join(exportsDir, file)
+            fs.unlinkSync(filePath)
+          }
+        }
+      }
+    } else {
+      // Full export: clear entire exports directory
+      if (fs.existsSync(exportsDir)) {
+        fs.rmSync(exportsDir, { recursive: true, force: true })
+      }
+      fs.mkdirSync(exportsDir, { recursive: true })
+    }
+    
+    // Generate filename with timestamps
     const baseFileName = path.join(exportsDir, sanitizeName(videoId))
     
     const paths = await exportVideo(args, baseFileName + '.mp4', mainWindow)

@@ -69,6 +69,17 @@ export function cancelExportBySliceId(sliceId: string): boolean {
 // Helpers
 // ---------------------------------------------------------------------------
 
+// Helper to format time for filenames (e.g., 50.5s -> "50s" or 125.3s -> "2m5s")
+function formatTimeForFilename(seconds: number): string {
+  const roundedSeconds = Math.round(seconds)
+  if (roundedSeconds < 60) {
+    return `${roundedSeconds}s`
+  }
+  const mins = Math.floor(roundedSeconds / 60)
+  const secs = roundedSeconds % 60
+  return secs > 0 ? `${mins}m${secs}s` : `${mins}m`
+}
+
 function buildSliceKeyframes(
   allKeyframes: Keyframe[],
   sliceStart: number,
@@ -536,10 +547,16 @@ export async function exportVideo(
     const baseName = outputDir.replace(/\.[^.]+$/, '')
     const ext = outputDir.match(/(\.[ ^.]+)$/)?.[1] ?? '.mp4'
     const total = exportSlices?.length || 1
+    
+    // Generate timestamp-based filename
+    const startTime = formatTimeForFilename(slice.start)
+    const endTime = formatTimeForFilename(slice.end)
+    const timestampLabel = `${startTime}-to-${endTime}`
+    
     const outputPath =
       total === 1
-        ? outputDir.replace(/(\.[ ^.]+)$/, `_${resLabel}$1`)
-        : `${baseName}_slice-${index + 1}_${resLabel}${ext}`
+        ? `${baseName}_${timestampLabel}_${resLabel}${ext}`
+        : `${baseName}_${timestampLabel}_${resLabel}${ext}`
 
     return {
       slice,

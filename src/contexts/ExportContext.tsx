@@ -5,6 +5,8 @@ interface ExportProgress {
   state: 'progress' | 'done' | 'error'
   path?: string
   error?: string
+  startTime?: number
+  estimatedTimeRemaining?: number
 }
 
 interface ExportContextType {
@@ -65,7 +67,7 @@ export function ExportProvider({ children }: { children: ReactNode }) {
     setIsExporting(true)
     setSliceProgress(
       Object.fromEntries(
-        slices.map((s) => [s.id, { progress: 0, state: 'progress' as const }])
+        slices.map((s) => [s.id, { progress: 0, state: 'progress' as const, startTime: Date.now() }])
       )
     )
 
@@ -81,15 +83,27 @@ export function ExportProvider({ children }: { children: ReactNode }) {
       if (!sliceId) return
 
       setSliceProgress((prev) => {
-        const existing = prev[sliceId] || { progress: 0, state: 'progress' as const }
+        const existing = prev[sliceId] || { progress: 0, state: 'progress' as const, startTime: Date.now() }
+        const newProgress = typeof progress === 'number' ? progress : existing.progress
+        
+        // Calculate estimated time remaining
+        let estimatedTimeRemaining: number | undefined
+        if (newProgress > 0 && newProgress < 100 && existing.startTime) {
+          const elapsed = Date.now() - existing.startTime
+          const progressFraction = newProgress / 100
+          const totalEstimated = elapsed / progressFraction
+          estimatedTimeRemaining = Math.max(0, (totalEstimated - elapsed) / 1000) // in seconds
+        }
+        
         return {
           ...prev,
           [sliceId]: {
             ...existing,
-            progress: typeof progress === 'number' ? progress : existing.progress,
+            progress: newProgress,
             state: state || existing.state,
             path: path || existing.path,
             error: error || existing.error,
+            estimatedTimeRemaining,
           },
         }
       })

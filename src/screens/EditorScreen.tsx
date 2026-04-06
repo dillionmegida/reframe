@@ -54,7 +54,7 @@ const ModalBackdrop = styled.div`
 `
 
 const Modal = styled.div`
-  width: 380px;
+  width: 480px;
   background: #161616;
   border: 1px solid #2a2a2a;
   border-radius: 0.75rem;
@@ -66,9 +66,10 @@ const Modal = styled.div`
 `
 
 const ModalTitle = styled.h2`
-  font-size: 0.875rem;
+  font-size: 1rem;
   font-weight: 600;
   color: #e5e5e5;
+  margin: 0;
 `
 
 const ProgressTrack = styled.div`
@@ -91,6 +92,59 @@ const MonoText = styled.p`
   font-family: 'IBM Plex Mono', monospace;
   font-size: 0.75rem;
   color: #6b7280;
+  margin: 0;
+`
+
+const SliceCard = styled.div`
+  padding: 0.875rem;
+  border: 1px solid #2a2a2a;
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.02);
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+`
+
+const SliceHeader = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+`
+
+const SliceInfo = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+`
+
+const SliceTitle = styled.div`
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #e5e5e5;
+`
+
+const SliceTimestamp = styled.div`
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.6875rem;
+  color: #6b7280;
+`
+
+const SliceStatus = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+`
+
+const StatusText = styled.div<{ $state: 'progress' | 'done' | 'error' }>`
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: ${p => p.$state === 'done' ? '#10b981' : p.$state === 'error' ? '#f87171' : '#f97316'};
+`
+
+const TimeRemaining = styled.div`
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.6875rem;
+  color: #9ca3af;
 `
 
 const ErrorText = styled.p`
@@ -326,43 +380,62 @@ function EditorContent() {
         <ModalBackdrop>
           <Modal>
             <ModalTitle>
-              {exportComplete ? 'Export Complete' : exportError ? 'Export Failed' : 
-               exportingSlices.length === 1 ? 'Exporting Slice...' : `Exporting ${exportingSlices.length} Slices...`}
+              {exportComplete ? '✓ Export Complete' : exportError ? '✗ Export Failed' : 
+               exportingSlices.length === 1 ? 'Exporting Slice' : `Exporting ${exportingSlices.length} Slices`}
             </ModalTitle>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
               {exportingSlices.map((slice: any, idx: number) => {
                 const state = sliceProgress[slice.id]
                 const pct = Math.round(state?.progress ?? 0)
                 const isDone = state?.state === 'done'
                 const isError = state?.state === 'error'
+                const timeRemaining = state?.estimatedTimeRemaining
+
+                // Format time for display
+                const formatTime = (seconds: number) => {
+                  const roundedSeconds = Math.round(seconds)
+                  if (roundedSeconds < 60) {
+                    return `${roundedSeconds}s`
+                  }
+                  const mins = Math.floor(roundedSeconds / 60)
+                  const secs = roundedSeconds % 60
+                  return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`
+                }
+
+                const formatSliceTime = (seconds: number) => {
+                  const roundedSeconds = Math.round(seconds)
+                  if (roundedSeconds < 60) {
+                    return `${roundedSeconds}s`
+                  }
+                  const mins = Math.floor(roundedSeconds / 60)
+                  const secs = roundedSeconds % 60
+                  return secs > 0 ? `${mins}m${secs}s` : `${mins}m`
+                }
 
                 return (
-                  <div
-                    key={slice.id}
-                    style={{
-                      padding: '0.75rem 0.75rem 0.5rem',
-                      border: '1px solid #2a2a2a',
-                      borderRadius: '0.5rem',
-                      background: 'rgba(255, 255, 255, 0.02)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '0.35rem',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <MonoText style={{ color: '#e5e5e5' }}>Slice {idx + 1}</MonoText>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <MonoText style={{ color: isDone ? '#10b981' : isError ? '#f87171' : '#6b7280' }}>
-                          {isDone ? 'Completed' : isError ? 'Failed' : `${pct}%`}
-                        </MonoText>
+                  <SliceCard key={slice.id}>
+                    <SliceHeader>
+                      <SliceInfo>
+                        <SliceTitle>Slice {idx + 1}</SliceTitle>
+                        <SliceTimestamp>
+                          {formatSliceTime(slice.start)} → {formatSliceTime(slice.end)}
+                        </SliceTimestamp>
+                      </SliceInfo>
+                      <SliceStatus>
+                        {!isDone && !isError && timeRemaining !== undefined && timeRemaining > 0 && (
+                          <TimeRemaining>{formatTime(timeRemaining)} left</TimeRemaining>
+                        )}
+                        <StatusText $state={state?.state || 'progress'}>
+                          {isDone ? 'Done' : isError ? 'Failed' : `${pct}%`}
+                        </StatusText>
                         {isExporting && !isDone && !isError && (
                           <CancelButton onClick={() => cancelSliceExport(slice.id)} title="Cancel export">
                             ×
                           </CancelButton>
                         )}
-                      </div>
-                    </div>
+                      </SliceStatus>
+                    </SliceHeader>
 
                     {!isDone && !isError && (
                       <ProgressTrack>
@@ -372,22 +445,22 @@ function EditorContent() {
 
                     {isDone && state?.path && (
                       <PrimaryGhost onClick={() => window.electron.showInFolder(state.path!)}>
-                        Show file
+                        Show in Folder
                       </PrimaryGhost>
                     )}
 
                     {isError && state?.error && <ErrorText>{state.error}</ErrorText>}
-                  </div>
+                  </SliceCard>
                 )
               })}
             </div>
 
             {exportError && <ErrorText>{exportError}</ErrorText>}
 
-            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '0.25rem' }}>
               {isExporting && (
                 <SecondaryGhost onClick={cancelExport}>
-                  Cancel
+                  Cancel All
                 </SecondaryGhost>
               )}
               {(exportComplete || exportError) && (
