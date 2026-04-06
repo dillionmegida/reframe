@@ -57,6 +57,7 @@ interface EditorState {
   setTrimEnd: (t: number) => void
 
   setOutputRatio: (ratio: Project['outputRatio'], width: number, height: number) => void
+  setStabilization: (enabled: boolean, smoothing?: number) => void
 
   // Slice actions
   addSlice: (atTime: number) => void
@@ -315,6 +316,20 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         outputRatio: ratio,
         outputWidth: width,
         outputHeight: height,
+      },
+    })
+  },
+
+  setStabilization: (enabled, smoothing = 10) => {
+    const { project } = get()
+    if (!project) return
+    set({
+      project: {
+        ...project,
+        stabilization: {
+          enabled,
+          smoothing,
+        },
       },
     })
   },

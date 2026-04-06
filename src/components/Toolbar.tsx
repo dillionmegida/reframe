@@ -138,6 +138,23 @@ const TrimText = styled.span`
   color: #6b7280;
 `
 
+const StabilizationToggle = styled.button<{ $active: boolean }>`
+  padding: 0.25rem 0.6rem;
+  font-size: 0.75rem;
+  border-radius: 0.375rem;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.2s, color 0.2s;
+  background: ${(p) => (p.$active ? 'rgba(249, 115, 22, 0.15)' : 'transparent')};
+  color: ${(p) => (p.$active ? '#f97316' : '#6b7280')};
+  font-weight: ${(p) => (p.$active ? 500 : 400)};
+
+  &:hover {
+    background: ${(p) => (p.$active ? 'rgba(249, 115, 22, 0.2)' : 'rgba(255, 255, 255, 0.05)')};
+    color: ${(p) => (p.$active ? '#f97316' : '#e5e5e5')};
+  }
+`
+
 const HistoryButton = styled.button<{ $enabled: boolean }>`
   padding: 0.25rem 0.5rem;
   font-size: 0.875rem;
@@ -176,6 +193,7 @@ export default function Toolbar() {
   const undo = useEditorStore((s) => s.undo)
   const redo = useEditorStore((s) => s.redo)
   const setOutputRatio = useEditorStore((s) => s.setOutputRatio)
+  const setStabilization = useEditorStore((s) => s.setStabilization)
   const closeProject = useEditorStore((s) => s.closeProject)
   const navigate = useAppStore((s) => s.navigate)
   const route = useAppStore((s) => s.route)
@@ -234,6 +252,20 @@ export default function Toolbar() {
           </RatioButton>
         ))}
       </RatioGroup>
+
+      <Divider />
+
+      <StabilizationToggle
+        $active={project.stabilization?.enabled ?? false}
+        onClick={() => {
+          const currentEnabled = project.stabilization?.enabled ?? false
+          setStabilization(!currentEnabled, project.stabilization?.smoothing ?? 10)
+        }}
+        style={{ WebkitAppRegion: 'no-drag' } as any}
+        title="Toggle video stabilization"
+      >
+        Stabilize
+      </StabilizationToggle>
 
       <Divider />
 

@@ -206,6 +206,35 @@ function requestPreviewCapture(
 // Phase 2: mux (main process, ffmpeg — runs concurrently with other muxes)
 // ---------------------------------------------------------------------------
 
+function detectStabilization(
+  frameDir: string,
+  fps: number,
+  transformsFile: string,
+  abortSignal: AbortSignal
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const command = ffmpeg()
+      .input(`${frameDir}/frame_%06d.jpg`)
+      .inputOptions(['-framerate', String(fps)])
+      .outputOptions([
+        '-vf', `vidstabdetect=shakiness=10:accuracy=15:result=${transformsFile}`,
+        '-f', 'null',
+      ])
+      .output('-')
+
+    command
+      .on('end', () => resolve())
+      .on('error', (err: Error) => {
+        if (abortSignal.aborted) {
+          reject(new Error('Export cancelled'))
+        } else {
+          reject(err)
+        }
+      })
+      .run()
+  })
+}
+
 function muxFramesWithAudio(
   frameDir: string,
   sourceVideoPath: string,
@@ -213,8 +242,16 @@ function muxFramesWithAudio(
   segmentStart: number,
   duration: number,
   fps: number,
-  abortSignal: AbortSignal
+  abortSignal: AbortSignal,
+  stabilization?: { enabled: boolean; smoothing?: number; transformsFile?: string }
 ): { command: ffmpeg.FfmpegCommand; promise: Promise<void> } {
+  const smoothing = stabilization?.smoothing ?? 10
+  const useStabilization = stabilization?.enabled && stabilization?.transformsFile
+  
+  const videoFilter = useStabilization
+    ? `vidstabtransform=input=${stabilization.transformsFile}:smoothing=${smoothing}:zoom=1:optzoom=0`
+    : undefined
+
   const command = ffmpeg()
     .input(`${frameDir}/frame_%06d.jpg`)
     .inputOptions(['-framerate', String(fps)])
@@ -230,6 +267,7 @@ function muxFramesWithAudio(
       '-preset', 'veryfast',
       '-crf', '15',
       '-pix_fmt', 'yuv420p',
+      ...(videoFilter ? ['-vf', videoFilter] : []),
       '-r', String(fps),
       '-c:a', 'aac',
       '-b:a', '256k',
@@ -350,6 +388,21 @@ async function runPipeline(
       sendSliceProgress(mainWindow, { sliceId: slice.id, progress: 80 })
       exportJob.state = 'muxing'
 
+      // --- Stabilization detection (if enabled) ---
+      let transformsFile: string | undefined
+      if (project.stabilization?.enabled) {
+        transformsFile = path.join(tempDir, 'transforms.trf')
+        try {
+          await detectStabilization(frameDir, fps, transformsFile, abortSignal)
+          exportJob.tempDirs.push(transformsFile)
+        } catch (err: any) {
+          if (!abortSignal.aborted) {
+            console.warn('[export] Stabilization detection failed, continuing without:', err.message)
+          }
+          transformsFile = undefined
+        }
+      }
+
       // --- Mux (fire-and-forget into the pool; does NOT block the next capture) ---
       const { command, promise } = muxFramesWithAudio(
         frameDir,
@@ -358,7 +411,14 @@ async function runPipeline(
         slice.start,
         duration,
         fps,
-        abortSignal
+        abortSignal,
+        project.stabilization?.enabled
+          ? {
+              enabled: true,
+              smoothing: project.stabilization.smoothing,
+              transformsFile,
+            }
+          : undefined
       )
 
       exportJob.ffmpegCommand = command

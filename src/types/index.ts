@@ -9,7 +9,7 @@ export interface Keyframe {
   easing: EasingType
 }
 
-export type AspectRatio = '9:16' | '4:5' | '1:1' | 'custom'
+export type AspectRatio = '9:16' | '4:5' | '1:1' | '16:9' | 'custom'
 
 export interface TrimRange {
   start: number
@@ -46,6 +46,10 @@ export interface VideoEntry {
   keyframes: Keyframe[]
   slices: Slice[]
   addedAt: number
+  stabilization?: {
+    enabled: boolean
+    smoothing?: number
+  }
 }
 
 export interface AppData {
