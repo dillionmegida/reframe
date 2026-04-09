@@ -236,6 +236,17 @@ const HiddenLabel = styled.span`
   font-family: 'IBM Plex Mono', monospace;
 `
 
+const UntrackedOverlay = styled.div<{ $left: number; $width: number }>`
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: rgba(251, 146, 60, 0.4);
+  cursor: pointer;
+  z-index: 18;
+  left: ${(p) => p.$left}px;
+  width: ${(p) => p.$width}px;
+`
+
 const KeyframeDot = styled.div<{ $size: number; $active: boolean; $selected: boolean }>`
   position: absolute;
   z-index: 20;
@@ -343,6 +354,8 @@ export default function Timeline() {
   const updateSlice = useEditorStore((s) => s.updateSlice)
   const setSliceStatus = useEditorStore((s) => s.setSliceStatus)
   const deleteSlice = useEditorStore((s) => s.deleteSlice)
+  const tracking = useEditorStore((s) => s.tracking)
+  const retrackFromFrame = useEditorStore((s) => s.retrackFromFrame)
   const basePath = useAppStore((s) => s.basePath)
   const route = useAppStore((s) => s.route)
   const getProject = useAppStore((s) => s.getProject)
@@ -740,6 +753,20 @@ export default function Timeline() {
                 </SliceWrapper>
               )
             })}
+
+            {tracking.untrackedRanges.map((range, i) => (
+              <UntrackedOverlay
+                key={`untracked-${i}`}
+                $left={timeToX(range.start)}
+                $width={timeToX(range.end) - timeToX(range.start)}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setCurrentTime(range.start)
+                  retrackFromFrame(Math.round(range.start * (project.videoFps || 30)))
+                }}
+                title="Tracking lost — click to retrack from here"
+              />
+            ))}
 
             {project.keyframes.map((kf) => {
               const isActive = Math.abs(currentTime - kf.timestamp) < 0.1

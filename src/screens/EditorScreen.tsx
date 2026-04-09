@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from 'react'
+import { useEffect, useCallback, useRef, useState } from 'react'
 import styled from 'styled-components'
 import { useEditorStore } from '../store/editorStore'
 import { useAppStore } from '../store/appStore'
@@ -6,8 +6,9 @@ import { ExportProvider, useExport } from '../contexts/ExportContext'
 import SourcePanel from '../components/SourcePanel'
 import PreviewPanel from '../components/PreviewPanel'
 import Timeline from '../components/Timeline'
-import Toolbar from '../components/Toolbar'
+import Toolbar, { type TrackingFps } from '../components/Toolbar'
 import { interpolateAtTime } from '../utils/interpolate'
+import { runTracker as runTrackerBridge } from '../utils/trackerBridge'
 
 const Container = styled.div`
   width: 100%;
@@ -223,6 +224,67 @@ function EditorContent() {
   const undo = useEditorStore((s) => s.undo)
   const redo = useEditorStore((s) => s.redo)
   const updateVideo = useAppStore((s) => s.updateVideo)
+  const beginTracking = useEditorStore((s) => s.beginTracking)
+  const updateTrackingProgress = useEditorStore((s) => s.updateTrackingProgress)
+  const finishTracking = useEditorStore((s) => s.finishTracking)
+  const applyTrackingAsKeyframes = useEditorStore((s) => s.applyTrackingAsKeyframes)
+  const cancelTracking = useEditorStore((s) => s.cancelTracking)
+
+  const cancelTrackerRef = useRef<(() => void) | null>(null)
+  const [trackingFps, setTrackingFps] = useState<TrackingFps>(15)
+
+  const handleTrackingBoxDrawn = useCallback(
+    (bbox: { x: number; y: number; w: number; h: number }) => {
+      if (!project) return
+
+      const tracking = useEditorStore.getState().tracking
+      if (!tracking.sliceId) {
+        console.error('[Tracker] No slice ID in tracking state')
+        cancelTracking()
+        return
+      }
+
+      const slice = project.slices.find((s) => s.id === tracking.sliceId)
+      if (!slice) {
+        console.error('[Tracker] Slice not found:', tracking.sliceId)
+        cancelTracking()
+        return
+      }
+
+      console.log('[Tracker] Starting tracking for slice', slice.id, 'range', slice.start, '-', slice.end)
+
+      const frameStart = Math.round(currentTime * (project.videoFps || 30))
+      beginTracking(bbox, frameStart)
+
+      runTrackerBridge({
+        videoPath: project.videoPath,
+        start: slice.start,
+        end: slice.end,
+        fps: trackingFps,
+        initialBbox: bbox,
+        frameWidth: project.videoWidth,
+        frameHeight: project.videoHeight,
+        onProgress: (progress, frame, total, confident) => {
+          updateTrackingProgress(progress, frame, total)
+        },
+        onDone: (results, untrackedRanges) => {
+          console.log('[Tracker] Done! Results:', results.length, 'Untracked:', untrackedRanges.length)
+          finishTracking(results, untrackedRanges)
+          // Auto-apply the tracked positions as keyframes immediately
+          useEditorStore.getState().applyTrackingAsKeyframes()
+          cancelTrackerRef.current = null
+        },
+        onError: (message) => {
+          console.error('[Tracker] Error:', message)
+          cancelTracking()
+          cancelTrackerRef.current = null
+        },
+      }).then((cancelFn) => {
+        cancelTrackerRef.current = cancelFn
+      })
+    },
+    [project, currentTime, trackingFps, beginTracking, updateTrackingProgress, finishTracking, cancelTracking]
+  )
   
   const { showExportModal, setShowExportModal, sliceProgress, exportComplete, exportError, exportingSlices, isExporting, cancelExport, cancelSliceExport } = useExport()
 
@@ -297,6 +359,13 @@ function EditorContent() {
       }
 
       if (e.code === 'Escape') {
+        const tracking = useEditorStore.getState().tracking
+        if (tracking.drawingBox || tracking.active) {
+          cancelTracking()
+          cancelTrackerRef.current?.()
+          cancelTrackerRef.current = null
+          return
+        }
         selectKeyframe(null)
         selectSlice(null)
         return
@@ -363,10 +432,10 @@ function EditorContent() {
 
   return (
     <Container>
-      <Toolbar />
+      <Toolbar trackingFps={trackingFps} onTrackingFpsChange={setTrackingFps} />
       <MainContent>
         <SourceContainer>
-          <SourcePanel />
+          <SourcePanel onTrackingBoxDrawn={handleTrackingBoxDrawn} />
         </SourceContainer>
         <PreviewContainer>
           <PreviewPanel />

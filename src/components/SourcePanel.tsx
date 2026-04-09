@@ -2,6 +2,8 @@ import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import styled from 'styled-components'
 import { useEditorStore } from '../store/editorStore'
 import { interpolateAtTime } from '../utils/interpolate'
+import TrackingOverlay from './TrackingOverlay'
+import TrackingProgress from './TrackingProgress'
 
 const Container = styled.div`
   width: 100%;
@@ -95,13 +97,19 @@ const SnapLine = styled.div<{ $left: number; $top: number; $height: number }>`
   pointer-events: none;
 `
 
-export default function SourcePanel() {
+export default function SourcePanel({
+  onTrackingBoxDrawn,
+}: {
+  onTrackingBoxDrawn?: (bbox: { x: number; y: number; w: number; h: number }) => void
+}) {
   const project = useEditorStore((s) => s.project!)
   const currentTime = useEditorStore((s) => s.currentTime)
   const isPlaying = useEditorStore((s) => s.isPlaying)
   const setCurrentTime = useEditorStore((s) => s.setCurrentTime)
   const setPlaying = useEditorStore((s) => s.setPlaying)
   const addOrUpdateKeyframe = useEditorStore((s) => s.addOrUpdateKeyframe)
+  const tracking = useEditorStore((s) => s.tracking)
+  const cancelTracking = useEditorStore((s) => s.cancelTracking)
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -552,6 +560,18 @@ export default function SourcePanel() {
       {showSnaps.right && (
         <SnapLine $left={snapPositions.right + cropRenderW} $top={videoRendered.y} $height={videoRendered.h} />
       )}
+
+      {tracking.drawingBox && (
+        <TrackingOverlay
+          videoRendered={videoRendered}
+          videoWidth={project.videoWidth}
+          videoHeight={project.videoHeight}
+          onBoxDrawn={(bbox) => onTrackingBoxDrawn?.(bbox)}
+          onCancel={cancelTracking}
+        />
+      )}
+
+      {tracking.active && <TrackingProgress />}
     </Container>
   )
 }

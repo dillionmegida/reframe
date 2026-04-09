@@ -58,5 +58,29 @@ export interface AppData {
   videos: VideoEntry[]
 }
 
+export interface TrackResult {
+  frame: number
+  t: number
+  x: number
+  y: number
+  confident: boolean
+}
+
+export interface UntrackedRange {
+  start: number
+  end: number
+}
+
+export interface TrackingState {
+  active: boolean
+  drawingBox: boolean
+  progress: number
+  currentFrame: number
+  totalFrames: number
+  untrackedRanges: UntrackedRange[]
+  results: TrackResult[]
+  sliceId: string | null
+}
+
 // Legacy alias — used by editorStore internally
 export type Project = VideoEntry

@@ -1,10 +1,11 @@
-import { useState } from 'react'
 import styled from 'styled-components'
 import { LeftCaretIcon } from './icons'
 import { useEditorStore } from '../store/editorStore'
 import { useAppStore } from '../store/appStore'
 import { useExport } from '../contexts/ExportContext'
 import type { AspectRatio } from '../types'
+
+export type TrackingFps = 15 | 30
 
 function formatTime(s: number): string {
   const m = Math.floor(s / 60)
@@ -186,8 +187,84 @@ const ExportButton = styled.button<{ $enabled: boolean }>`
   }
 `
 
-export default function Toolbar() {
+const TrackButton = styled.button`
+  padding: 0.25rem 0.6rem;
+  font-size: 0.75rem;
+  border-radius: 0.375rem;
+  border: none;
+  cursor: pointer;
+  background: rgba(74, 222, 128, 0.15);
+  color: #4ade80;
+  font-weight: 500;
+  transition: background-color 0.2s, color 0.2s;
+
+  &:hover {
+    background: rgba(74, 222, 128, 0.25);
+    color: #4ade80;
+  }
+`
+
+const TrackActionButton = styled.button<{ $variant?: 'apply' | 'discard' }>`
+  padding: 0.25rem 0.6rem;
+  font-size: 0.75rem;
+  border-radius: 0.375rem;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.2s, color 0.2s;
+  background: ${(p) =>
+    p.$variant === 'apply'
+      ? 'rgba(74, 222, 128, 0.15)'
+      : 'rgba(255, 255, 255, 0.05)'};
+  color: ${(p) =>
+    p.$variant === 'apply' ? '#4ade80' : '#6b7280'};
+  font-weight: ${(p) => (p.$variant === 'apply' ? 500 : 400)};
+
+  &:hover {
+    background: ${(p) =>
+      p.$variant === 'apply'
+        ? 'rgba(74, 222, 128, 0.25)'
+        : 'rgba(255, 255, 255, 0.1)'};
+    color: ${(p) =>
+      p.$variant === 'apply' ? '#4ade80' : '#e5e5e5'};
+  }
+`
+
+const SmoothnessRow = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+`
+
+const SmoothnessLabel = styled.span`
+  font-size: 0.6875rem;
+  color: #6b7280;
+  white-space: nowrap;
+`
+
+const FpsSelect = styled.select`
+  padding: 0.2rem 0.4rem;
+  font-size: 0.6875rem;
+  border-radius: 0.25rem;
+  border: 1px solid #2a2a2a;
+  background: #161616;
+  color: #6b7280;
+  cursor: pointer;
+  outline: none;
+
+  &:hover {
+    border-color: #3a3a3a;
+  }
+`
+
+export default function Toolbar({
+  trackingFps,
+  onTrackingFpsChange,
+}: {
+  trackingFps: TrackingFps
+  onTrackingFpsChange: (fps: TrackingFps) => void
+}) {
   const project = useEditorStore((s) => s.project!)
+  const currentTime = useEditorStore((s) => s.currentTime)
   const past = useEditorStore((s) => s.past)
   const future = useEditorStore((s) => s.future)
   const undo = useEditorStore((s) => s.undo)
@@ -195,6 +272,8 @@ export default function Toolbar() {
   const setOutputRatio = useEditorStore((s) => s.setOutputRatio)
   const setStabilization = useEditorStore((s) => s.setStabilization)
   const closeProject = useEditorStore((s) => s.closeProject)
+  const tracking = useEditorStore((s) => s.tracking)
+  const startBoxDraw = useEditorStore((s) => s.startBoxDraw)
   const navigate = useAppStore((s) => s.navigate)
   const route = useAppStore((s) => s.route)
   const basePath = useAppStore((s) => s.basePath)
@@ -203,6 +282,11 @@ export default function Toolbar() {
 
   const exportableSlices = (project.slices || []).filter((s) => s.status === 'keep')
   const hasExportableSlices = exportableSlices.length > 0
+
+  const currentSlice = project.slices.find(
+    (s) => currentTime >= s.start && currentTime <= s.end
+  )
+  const canTrack = !!currentSlice
 
   const handleExport = async () => {
     if (!hasExportableSlices || !basePath) return
@@ -283,6 +367,39 @@ export default function Toolbar() {
           ↪
         </HistoryButton>
       </div>
+
+      <Divider />
+
+      {!tracking.active && !tracking.drawingBox && tracking.results.length === 0 && (
+        <>
+          <TrackButton
+            onClick={() => currentSlice && startBoxDraw(currentSlice.id)}
+            disabled={!canTrack}
+            style={{ 
+              WebkitAppRegion: 'no-drag',
+              opacity: canTrack ? 1 : 0.5,
+              cursor: canTrack ? 'pointer' : 'not-allowed',
+            } as any}
+            title={
+              canTrack
+                ? "Track a subject across the current slice to auto-generate keyframes"
+                : "Move playhead inside a slice to enable tracking"
+            }
+          >
+            Track subject
+          </TrackButton>
+          <FpsSelect
+            value={trackingFps}
+            onChange={(e) => onTrackingFpsChange(Number(e.target.value) as TrackingFps)}
+            style={{ WebkitAppRegion: 'no-drag' } as any}
+            title="Tracking frame rate"
+            disabled={!canTrack}
+          >
+            <option value={15}>15fps (faster)</option>
+            <option value={30}>30fps (precise)</option>
+          </FpsSelect>
+        </>
+      )}
 
       <ExportButton
         onClick={handleExport}

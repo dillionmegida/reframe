@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { v4 as uuidv4 } from 'uuid'
-import type { Keyframe, VideoEntry, TrimRange, Slice, SliceStatus } from '../types'
+import type { Keyframe, VideoEntry, TrimRange, Slice, SliceStatus, TrackResult, UntrackedRange, TrackingState } from '../types'
+import { ramerDouglasPeucker } from '../utils/rdp'
 
 type Project = VideoEntry
 
@@ -42,6 +43,7 @@ interface EditorState {
   selectedSliceId: string | null
   past: UndoSnapshot[]
   future: UndoSnapshot[]
+  tracking: TrackingState
 
   loadProject: (project: Project) => void
   setCurrentTime: (t: number) => void
@@ -65,6 +67,14 @@ interface EditorState {
   updateSlice: (id: string, patch: Partial<Slice>) => void
   setSliceStatus: (id: string, status: SliceStatus) => void
   deleteSlice: (id: string) => void
+
+  startBoxDraw: (sliceId: string) => void
+  cancelTracking: () => void
+  beginTracking: (bbox: { x: number; y: number; w: number; h: number }, frameStart: number) => void
+  updateTrackingProgress: (progress: number, currentFrame: number, totalFrames: number) => void
+  finishTracking: (results: TrackResult[], untrackedRanges: UntrackedRange[]) => void
+  applyTrackingAsKeyframes: (epsilon?: number) => void
+  retrackFromFrame: (frameIndex: number) => void
 
   closeProject: () => void
   undo: () => void
@@ -102,6 +112,16 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   selectedSliceId: null,
   past: [],
   future: [],
+  tracking: {
+    active: false,
+    drawingBox: false,
+    progress: 0,
+    currentFrame: 0,
+    totalFrames: 0,
+    untrackedRanges: [],
+    results: [],
+    sliceId: null,
+  },
 
   loadProject: (project) => {
     // Ensure slices array exists for legacy data
@@ -414,6 +434,123 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     })
   },
 
+  startBoxDraw: (sliceId) => {
+    set({
+      isPlaying: false,
+      tracking: {
+        ...get().tracking,
+        drawingBox: true,
+        sliceId,
+      },
+    })
+  },
+
+  cancelTracking: () => {
+    set({
+      tracking: {
+        active: false,
+        drawingBox: false,
+        progress: 0,
+        currentFrame: 0,
+        totalFrames: 0,
+        untrackedRanges: [],
+        results: [],
+        sliceId: null,
+      },
+    })
+  },
+
+  beginTracking: (bbox, frameStart) => {
+    set({
+      tracking: {
+        ...get().tracking,
+        active: true,
+        drawingBox: false,
+        progress: 0,
+        currentFrame: frameStart,
+        totalFrames: 0,
+      },
+    })
+  },
+
+  updateTrackingProgress: (progress, currentFrame, totalFrames) => {
+    set({
+      tracking: {
+        ...get().tracking,
+        progress,
+        currentFrame,
+        totalFrames,
+      },
+    })
+  },
+
+  finishTracking: (results, untrackedRanges) => {
+    set({
+      tracking: {
+        ...get().tracking,
+        active: false,
+        progress: 100,
+        results,
+        untrackedRanges,
+      },
+    })
+  },
+
+  applyTrackingAsKeyframes: (epsilon = 0.015) => {
+    const { project, tracking, past } = get()
+    if (!project || tracking.results.length === 0) return
+
+    const confidentResults = tracking.results.filter((r) => r.confident)
+    if (confidentResults.length === 0) return
+
+    const simplified = ramerDouglasPeucker(
+      confidentResults.map((r) => ({ t: r.t, x: r.x, y: r.y })),
+      epsilon
+    )
+
+    const newKeyframes: Keyframe[] = simplified.map((p) => ({
+      id: uuidv4(),
+      timestamp: p.t,
+      x: p.x,
+      y: p.y,
+      scale: 1.0,
+      easing: 'ease-in-out',
+    }))
+
+    const newPast = pushUndo(past, project.keyframes, project.trim, project.slices)
+
+    set({
+      project: {
+        ...project,
+        keyframes: sortKeyframes([...project.keyframes, ...newKeyframes]),
+      },
+      past: newPast,
+      future: [],
+      tracking: {
+        active: false,
+        drawingBox: false,
+        progress: 0,
+        currentFrame: 0,
+        totalFrames: 0,
+        untrackedRanges: [],
+        results: [],
+        sliceId: null,
+      },
+    })
+  },
+
+  retrackFromFrame: (frameIndex) => {
+    set({
+      tracking: {
+        ...get().tracking,
+        drawingBox: true,
+        active: false,
+        results: [],
+        untrackedRanges: [],
+      },
+    })
+  },
+
   closeProject: () => {
     set({
       project: null,
@@ -423,6 +560,16 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       selectedSliceId: null,
       past: [],
       future: [],
+      tracking: {
+        active: false,
+        drawingBox: false,
+        progress: 0,
+        currentFrame: 0,
+        totalFrames: 0,
+        untrackedRanges: [],
+        results: [],
+        sliceId: null,
+      },
     })
   },
 
