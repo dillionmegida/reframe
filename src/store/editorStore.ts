@@ -121,6 +121,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     untrackedRanges: [],
     results: [],
     sliceId: null,
+    initialBbox: null,
   },
 
   loadProject: (project) => {
@@ -456,6 +457,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         untrackedRanges: [],
         results: [],
         sliceId: null,
+        initialBbox: null,
       },
     })
   },
@@ -469,6 +471,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         progress: 0,
         currentFrame: frameStart,
         totalFrames: 0,
+        initialBbox: bbox,
       },
     })
   },
@@ -508,12 +511,44 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       epsilon
     )
 
+    // Compute scale so the crop is 1.5x the tracking bbox
+    // cropFrac = 1/scale, so scale = 1/cropFrac
+    // We want the crop to be 1.5× the bbox in both dimensions,
+    // then pick the dimension that requires more zoom (larger scale)
+    const PADDING = 1.5
+    let scale = 1.0
+    if (tracking.initialBbox) {
+      const bboxFracW = tracking.initialBbox.w / project.videoWidth
+      const bboxFracH = tracking.initialBbox.h / project.videoHeight
+      const cropFracW = bboxFracW * PADDING
+      const cropFracH = bboxFracH * PADDING
+
+      // The output aspect ratio determines which dimension constrains the crop
+      const vidAspect = project.videoWidth / project.videoHeight
+      const outAspect = project.outputWidth / project.outputHeight
+
+      let scaleFromW: number
+      let scaleFromH: number
+      if (outAspect < vidAspect) {
+        // Portrait output: height is the primary axis
+        scaleFromH = 1 / cropFracH
+        scaleFromW = 1 / (cropFracW * (vidAspect / outAspect))
+      } else {
+        // Landscape output: width is the primary axis
+        scaleFromW = 1 / cropFracW
+        scaleFromH = 1 / (cropFracH * (outAspect / vidAspect))
+      }
+
+      // Use the smaller scale so the full 1.5x bbox fits in the crop
+      scale = Math.max(1, Math.min(scaleFromW, scaleFromH))
+    }
+
     const newKeyframes: Keyframe[] = simplified.map((p) => ({
       id: uuidv4(),
       timestamp: p.t,
       x: p.x,
       y: p.y,
-      scale: 1.0,
+      scale,
       easing: 'ease-in-out',
     }))
 
@@ -535,6 +570,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         untrackedRanges: [],
         results: [],
         sliceId: null,
+        initialBbox: null,
       },
     })
   },
@@ -569,6 +605,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         untrackedRanges: [],
         results: [],
         sliceId: null,
+        initialBbox: null,
       },
     })
   },

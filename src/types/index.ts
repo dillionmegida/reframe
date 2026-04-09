@@ -80,6 +80,7 @@ export interface TrackingState {
   untrackedRanges: UntrackedRange[]
   results: TrackResult[]
   sliceId: string | null
+  initialBbox: { x: number; y: number; w: number; h: number } | null
 }
 
 // Legacy alias — used by editorStore internally
