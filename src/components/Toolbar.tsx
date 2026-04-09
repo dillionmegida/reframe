@@ -386,7 +386,23 @@ export default function Toolbar({
                 : "Move playhead inside a slice to enable tracking"
             }
           >
-            Track subject
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+              <span>Track subject</span>
+              <span
+                style={{
+                  fontSize: '0.65em',
+                  padding: '0.15rem 0.35rem',
+                  background: 'rgba(255, 255, 255, 0.18)',
+                  color: 'rgba(255, 255, 255, 0.9)',
+                  borderRadius: '999px',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.04em',
+                  lineHeight: 1,
+                }}
+              >
+                Beta
+              </span>
+            </span>
           </TrackButton>
           <FpsSelect
             value={trackingFps}
