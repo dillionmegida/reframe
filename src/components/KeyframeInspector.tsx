@@ -230,7 +230,7 @@ export default function KeyframeInspector({ keyframeId, anchorX, containerRef }:
           }}
         />
         <CheckboxLabel htmlFor={`explicit-scale-${keyframeId}`}>
-          With Scale
+          Include Scale in Keyframe
         </CheckboxLabel>
       </CheckboxRow>
 

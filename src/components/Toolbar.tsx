@@ -1,11 +1,11 @@
+import { useState } from 'react'
 import styled from 'styled-components'
-import { LeftCaretIcon } from './icons'
+import { LeftCaretIcon, SettingsIcon } from './icons'
 import { useEditorStore } from '../store/editorStore'
 import { useAppStore } from '../store/appStore'
 import { useExport } from '../contexts/ExportContext'
-import type { AspectRatio } from '../types'
-
-export type TrackingFps = 15 | 30
+import type { AspectRatio, TrackingFps } from '../types'
+import TrackingSettingsModal from './TrackingSettingsModal'
 
 function formatTime(s: number): string {
   const m = Math.floor(s / 60)
@@ -256,6 +256,21 @@ const FpsSelect = styled.select`
   }
 `
 
+const SettingsButton = styled.button`
+  /* padding: 0.25rem 0.5rem; */
+  font-size: 0.5rem;
+  border-radius: 0.375rem;
+  border: none;
+  cursor: pointer;
+  background: none;
+  color: #6b7280;
+  transition: background-color 0.2s, color 0.2s;
+
+  &:hover {
+    color: #e5e5e5;
+  }
+`
+
 export default function Toolbar({
   trackingFps,
   onTrackingFpsChange,
@@ -274,6 +289,10 @@ export default function Toolbar({
   const closeProject = useEditorStore((s) => s.closeProject)
   const tracking = useEditorStore((s) => s.tracking)
   const startBoxDraw = useEditorStore((s) => s.startBoxDraw)
+  const trackingSettings = useEditorStore((s) => s.trackingSettings)
+  const setTrackingSettings = useEditorStore((s) => s.setTrackingSettings)
+
+  const [showSettingsModal, setShowSettingsModal] = useState(false)
   const navigate = useAppStore((s) => s.navigate)
   const route = useAppStore((s) => s.route)
   const basePath = useAppStore((s) => s.basePath)
@@ -404,17 +423,24 @@ export default function Toolbar({
               </span>
             </span>
           </TrackButton>
-          <FpsSelect
-            value={trackingFps}
-            onChange={(e) => onTrackingFpsChange(Number(e.target.value) as TrackingFps)}
+          <SettingsButton
+            onClick={() => setShowSettingsModal(true)}
             style={{ WebkitAppRegion: 'no-drag' } as any}
-            title="Tracking frame rate"
-            disabled={!canTrack}
+            title="Tracking settings"
           >
-            <option value={15}>15fps (faster)</option>
-            <option value={30}>30fps (precise)</option>
-          </FpsSelect>
+            <SettingsIcon size={16} />
+          </SettingsButton>
         </>
+      )}
+
+      {showSettingsModal && (
+        <TrackingSettingsModal
+          settings={trackingSettings}
+          trackingFps={trackingFps}
+          onTrackingFpsChange={onTrackingFpsChange}
+          onSave={setTrackingSettings}
+          onClose={() => setShowSettingsModal(false)}
+        />
       )}
 
       <ExportButton

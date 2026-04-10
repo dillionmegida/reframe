@@ -1,4 +1,5 @@
 export type EasingType = 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out'
+export type TrackingFps = 15 | 30
 
 export interface Keyframe {
   id: string

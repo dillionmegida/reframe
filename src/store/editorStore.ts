@@ -1,7 +1,14 @@
 import { create } from 'zustand'
 import { v4 as uuidv4 } from 'uuid'
-import type { Keyframe, VideoEntry, TrimRange, Slice, SliceStatus, TrackResult, UntrackedRange, TrackingState } from '../types'
+import type { Keyframe, VideoEntry, TrimRange, Slice, SliceStatus, TrackResult, UntrackedRange, TrackingState, EasingType } from '../types'
 import { ramerDouglasPeucker } from '../utils/rdp'
+
+export type AutoEasingType = 'auto' | EasingType
+
+export interface TrackingSettings {
+  minDuration: number
+  defaultEasing: AutoEasingType
+}
 
 type Project = VideoEntry
 
@@ -44,6 +51,7 @@ interface EditorState {
   past: UndoSnapshot[]
   future: UndoSnapshot[]
   tracking: TrackingState
+  trackingSettings: TrackingSettings
 
   loadProject: (project: Project) => void
   setCurrentTime: (t: number) => void
@@ -75,6 +83,7 @@ interface EditorState {
   finishTracking: (results: TrackResult[], untrackedRanges: UntrackedRange[]) => void
   applyTrackingAsKeyframes: (epsilon?: number) => void
   retrackFromFrame: (frameIndex: number) => void
+  setTrackingSettings: (settings: TrackingSettings) => void
 
   closeProject: () => void
   undo: () => void
@@ -122,6 +131,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     results: [],
     sliceId: null,
     initialBbox: null,
+  },
+  trackingSettings: {
+    minDuration: 1.0,
+    defaultEasing: 'auto',
   },
 
   loadProject: (project) => {
@@ -507,7 +520,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   applyTrackingAsKeyframes: (epsilon = 0.015) => {
-    const { project, tracking, past } = get()
+    const { project, tracking, past, trackingSettings } = get()
     if (!project || tracking.results.length === 0) return
 
     const confidentResults = tracking.results.filter((r) => r.confident)
@@ -517,6 +530,18 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       confidentResults.map((r) => ({ t: r.t, x: r.x, y: r.y })),
       epsilon
     )
+
+    // Filter by minimum duration
+    const filtered: typeof simplified = []
+    let lastTimestamp = -Infinity
+    for (const point of simplified) {
+      if (point.t - lastTimestamp >= trackingSettings.minDuration) {
+        filtered.push(point)
+        lastTimestamp = point.t
+      }
+    }
+
+    if (filtered.length === 0) return
 
     // Compute scale so the crop is 1.5x the tracking bbox
     // cropFrac = 1/scale, so scale = 1/cropFrac
@@ -550,14 +575,38 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       scale = Math.max(1, Math.min(scaleFromW, scaleFromH))
     }
 
-    const newKeyframes: Keyframe[] = simplified.map((p) => ({
+    // Auto easing: select based on time gap between keyframes
+    const determineEasing = (index: number): EasingType => {
+      if (trackingSettings.defaultEasing !== 'auto') {
+        return trackingSettings.defaultEasing
+      }
+      
+      // For auto mode, use easing based on spacing
+      const prevGap = index > 0 ? filtered[index].t - filtered[index - 1].t : 0
+      const nextGap = index < filtered.length - 1 ? filtered[index + 1].t - filtered[index].t : 0
+      
+      // Short gaps (< 2s): use ease-in-out for smooth motion
+      // Medium gaps (2-4s): use linear for predictable motion
+      // Long gaps (> 4s): use ease-in-out for natural acceleration/deceleration
+      const avgGap = (prevGap + nextGap) / 2
+      
+      if (avgGap < 2) {
+        return 'ease-in-out'
+      } else if (avgGap < 4) {
+        return 'linear'
+      } else {
+        return 'ease-in-out'
+      }
+    }
+
+    const newKeyframes: Keyframe[] = filtered.map((p, i) => ({
       id: uuidv4(),
       timestamp: p.t,
       x: p.x,
       y: p.y,
       scale,
       explicitScale: true,
-      easing: 'ease-in-out',
+      easing: determineEasing(i),
     }))
 
     const newPast = pushUndo(past, project.keyframes, project.trim, project.slices)
@@ -593,6 +642,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         untrackedRanges: [],
       },
     })
+  },
+
+  setTrackingSettings: (settings) => {
+    set({ trackingSettings: settings })
   },
 
   closeProject: () => {
