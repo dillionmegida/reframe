@@ -1,6 +1,26 @@
 import type { Keyframe } from '../types'
 import { applyEasing } from './easing'
 
+function resolveKeyframeScales(keyframes: Keyframe[]): Keyframe[] {
+  if (keyframes.length === 0) return []
+  
+  const resolved: Keyframe[] = []
+  let inheritedScale = 1.0
+  
+  for (let i = 0; i < keyframes.length; i++) {
+    const kf = keyframes[i]
+    
+    if (kf.explicitScale) {
+      inheritedScale = kf.scale
+      resolved.push({ ...kf, scale: kf.scale })
+    } else {
+      resolved.push({ ...kf, scale: inheritedScale })
+    }
+  }
+  
+  return resolved
+}
+
 export function interpolateAtTime(
   keyframes: Keyframe[],
   t: number
@@ -9,24 +29,26 @@ export function interpolateAtTime(
     return { x: 0.5, y: 0.5, scale: 1.0 }
   }
 
-  if (keyframes.length === 1 || t <= keyframes[0].timestamp) {
-    return { x: keyframes[0].x, y: keyframes[0].y, scale: keyframes[0].scale }
+  const resolvedKeyframes = resolveKeyframeScales(keyframes)
+
+  if (resolvedKeyframes.length === 1 || t <= resolvedKeyframes[0].timestamp) {
+    return { x: resolvedKeyframes[0].x, y: resolvedKeyframes[0].y, scale: resolvedKeyframes[0].scale }
   }
 
-  const last = keyframes[keyframes.length - 1]
+  const last = resolvedKeyframes[resolvedKeyframes.length - 1]
   if (t >= last.timestamp) {
     return { x: last.x, y: last.y, scale: last.scale }
   }
 
   let i = 0
-  for (; i < keyframes.length - 1; i++) {
-    if (t >= keyframes[i].timestamp && t < keyframes[i + 1].timestamp) {
+  for (; i < resolvedKeyframes.length - 1; i++) {
+    if (t >= resolvedKeyframes[i].timestamp && t < resolvedKeyframes[i + 1].timestamp) {
       break
     }
   }
 
-  const kfA = keyframes[i]
-  const kfB = keyframes[i + 1]
+  const kfA = resolvedKeyframes[i]
+  const kfB = resolvedKeyframes[i + 1]
 
   const duration = kfB.timestamp - kfA.timestamp
   if (duration <= 0) {
@@ -40,7 +62,7 @@ export function interpolateAtTime(
   // At boundaries, mirror the adjacent keyframe to get a natural non-zero tangent
   // instead of clamping (which produces a flat/jerky start or end).
   const kfPrev = i > 0
-    ? keyframes[i - 1]
+    ? resolvedKeyframes[i - 1]
     : {
         ...kfA,
         timestamp: kfA.timestamp - (kfB.timestamp - kfA.timestamp),
@@ -48,8 +70,8 @@ export function interpolateAtTime(
         y: 2 * kfA.y - kfB.y,
         scale: 2 * kfA.scale - kfB.scale,
       }
-  const kfNext = i + 2 < keyframes.length
-    ? keyframes[i + 2]
+  const kfNext = i + 2 < resolvedKeyframes.length
+    ? resolvedKeyframes[i + 2]
     : {
         ...kfB,
         timestamp: kfB.timestamp + (kfB.timestamp - kfA.timestamp),

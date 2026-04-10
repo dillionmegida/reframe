@@ -6,6 +6,7 @@ export interface Keyframe {
   x: number
   y: number
   scale: number
+  explicitScale?: boolean
   easing: EasingType
 }
 

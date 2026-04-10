@@ -103,6 +103,50 @@ const ActionButton = styled.button<{ $danger?: boolean }>`
   }
 `
 
+const ScaleInput = styled.input`
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.75rem;
+  color: #e5e5e5;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid #2a2a2a;
+  border-radius: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  width: 80px;
+  text-align: right;
+
+  &:focus {
+    outline: none;
+    border-color: #f97316;
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+`
+
+const CheckboxRow = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+`
+
+const Checkbox = styled.input`
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  accent-color: #f97316;
+`
+
+const CheckboxLabel = styled.label`
+  font-size: 0.6875rem;
+  color: #e5e5e5;
+  cursor: pointer;
+  user-select: none;
+`
+
 export default function KeyframeInspector({ keyframeId, anchorX, containerRef }: Props) {
   const project = useEditorStore((s) => s.project!)
   const selectKeyframe = useEditorStore((s) => s.selectKeyframe)
@@ -111,6 +155,9 @@ export default function KeyframeInspector({ keyframeId, anchorX, containerRef }:
   const cloneKeyframeMinus = useEditorStore((s) => s.cloneKeyframeMinus)
 
   const popoverRef = useRef<HTMLDivElement>(null)
+
+  const kf = project.keyframes.find((k) => k.id === keyframeId)
+  const hasExplicitScale = kf?.explicitScale ?? false
 
   // Close on click outside or Escape — must be before any early returns
   useEffect(() => {
@@ -132,7 +179,6 @@ export default function KeyframeInspector({ keyframeId, anchorX, containerRef }:
     }
   }, [selectKeyframe])
 
-  const kf = project.keyframes.find((k) => k.id === keyframeId)
   if (!kf) return null
 
   // Compute fixed position from container bounding rect
@@ -151,6 +197,42 @@ export default function KeyframeInspector({ keyframeId, anchorX, containerRef }:
         <Label>Time</Label>
         <ValueText>{formatTimestamp(kf.timestamp)}</ValueText>
       </Row>
+
+      <Row>
+        <Label>Scale</Label>
+        <ScaleInput
+          type="number"
+          min="1.0"
+          max="4.0"
+          step="0.1"
+          value={kf.scale.toFixed(1)}
+          disabled={!hasExplicitScale}
+          onChange={(e) => {
+            const newScale = parseFloat(e.target.value)
+            if (!isNaN(newScale) && newScale >= 1.0 && newScale <= 4.0) {
+              updateKeyframe(keyframeId, { scale: newScale, explicitScale: true })
+            }
+          }}
+        />
+      </Row>
+
+      <CheckboxRow>
+        <Checkbox
+          type="checkbox"
+          id={`explicit-scale-${keyframeId}`}
+          checked={hasExplicitScale}
+          onChange={(e) => {
+            if (e.target.checked) {
+              updateKeyframe(keyframeId, { explicitScale: true })
+            } else {
+              updateKeyframe(keyframeId, { explicitScale: false })
+            }
+          }}
+        />
+        <CheckboxLabel htmlFor={`explicit-scale-${keyframeId}`}>
+          With Scale
+        </CheckboxLabel>
+      </CheckboxRow>
 
       <div>
         <Label>Easing</Label>

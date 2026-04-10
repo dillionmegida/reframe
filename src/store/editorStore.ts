@@ -50,7 +50,7 @@ interface EditorState {
   setPlaying: (v: boolean) => void
   selectKeyframe: (id: string | null) => void
 
-  addOrUpdateKeyframe: (kf: Omit<Keyframe, 'id'>) => void
+  addOrUpdateKeyframe: (kf: Omit<Keyframe, 'id'> & { explicitScale?: boolean }) => void
   updateKeyframe: (id: string, patch: Partial<Keyframe>) => void
   deleteKeyframe: (id: string) => void
   cloneKeyframeMinus: (id: string, offsetSeconds?: number) => void
@@ -173,15 +173,21 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
     let newKeyframes: Keyframe[]
     if (existing) {
+      const updated = { ...existing, ...kf, easing, id: existing.id }
+      if (kf.explicitScale !== undefined) {
+        updated.explicitScale = kf.explicitScale
+      }
       newKeyframes = project.keyframes.map((k) =>
-        k.id === existing.id
-          ? { ...k, ...kf, easing, id: k.id }
-          : k
+        k.id === existing.id ? updated : k
       )
     } else {
+      const newKf: Keyframe = { ...kf, easing, id: uuidv4() }
+      if (kf.explicitScale !== undefined) {
+        newKf.explicitScale = kf.explicitScale
+      }
       newKeyframes = [
         ...project.keyframes,
-        { ...kf, easing, id: uuidv4() },
+        newKf,
       ]
     }
 
@@ -269,6 +275,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           x: source.x,
           y: source.y,
           scale: source.scale,
+          explicitScale: source.explicitScale,
           easing: source.easing,
         },
       ]
@@ -549,6 +556,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       x: p.x,
       y: p.y,
       scale,
+      explicitScale: true,
       easing: 'ease-in-out',
     }))
 

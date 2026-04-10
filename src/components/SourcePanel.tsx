@@ -449,6 +449,7 @@ export default function SourcePanel({
           x: Math.max(0, Math.min(1, normX)),
           y: Math.max(0, Math.min(1, normY)),
           scale: newScale,
+          explicitScale: true,
           easing: 'linear',
         })
       }
@@ -479,6 +480,7 @@ export default function SourcePanel({
           x: interp.x,
           y: interp.y,
           scale: newScale,
+          explicitScale: true,
           easing: 'linear',
         })
       }, 150)
