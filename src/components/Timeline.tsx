@@ -7,6 +7,7 @@ import { useExport } from '../contexts/ExportContext'
 import type { SliceStatus } from '../types'
 import Playback from './Playback'
 import KeyframeInspector from './KeyframeInspector'
+import MultiKeyframeInspector from './MultiKeyframeInspector'
 
 function formatTime(s: number): string {
   const m = Math.floor(s / 60)
@@ -341,9 +342,10 @@ const ContextItem = styled.button`
 export default function Timeline() {
   const project = useEditorStore((s) => s.project!)
   const currentTime = useEditorStore((s) => s.currentTime)
-  const selectedKeyframeId = useEditorStore((s) => s.selectedKeyframeId)
+  const selectedKeyframeIds = useEditorStore((s) => s.selectedKeyframeIds)
   const setCurrentTime = useEditorStore((s) => s.setCurrentTime)
   const selectKeyframe = useEditorStore((s) => s.selectKeyframe)
+  const toggleKeyframeSelection = useEditorStore((s) => s.toggleKeyframeSelection)
   const updateKeyframe = useEditorStore((s) => s.updateKeyframe)
   const deleteKeyframe = useEditorStore((s) => s.deleteKeyframe)
   const cloneKeyframeMinus = useEditorStore((s) => s.cloneKeyframeMinus)
@@ -770,7 +772,7 @@ export default function Timeline() {
 
             {project.keyframes.map((kf) => {
               const isActive = Math.abs(currentTime - kf.timestamp) < 0.1
-              const isSelected = selectedKeyframeId === kf.id
+              const isSelected = selectedKeyframeIds.includes(kf.id)
               const size = isActive ? 12 : 10
 
               return (
@@ -779,12 +781,14 @@ export default function Timeline() {
                   $size={size}
                   $active={isActive}
                   $selected={isSelected}
-                  style={{ left: timeToX(kf.timestamp) - size / 2 }}
-                  onMouseDown={(e) => handleKeyframeDragStart(e, kf.id)}
+                  data-keyframe-dot
+                  style={{
+                    left: timeToX(kf.timestamp) - size / 2,
+                  }}
                   onClick={(e) => {
+                    e.preventDefault()
                     e.stopPropagation()
-                    setCurrentTime(kf.timestamp)
-                    selectKeyframe(kf.id)
+                    toggleKeyframeSelection(kf.id, e.metaKey || e.ctrlKey, e.shiftKey)
                   }}
                   onContextMenu={(e) => handleKeyframeContextMenu(e, kf.id)}
                 >
@@ -819,10 +823,17 @@ export default function Timeline() {
         </ZoomRow>
       </Controls>
 
-      {selectedKeyframeId && (
+      {selectedKeyframeIds.length === 1 && (
         <KeyframeInspector
-          keyframeId={selectedKeyframeId}
-          anchorX={timeToX(project.keyframes.find((k) => k.id === selectedKeyframeId)?.timestamp ?? 0) - scrollLeft}
+          keyframeId={selectedKeyframeIds[0]}
+          anchorX={timeToX(project.keyframes.find((k) => k.id === selectedKeyframeIds[0])?.timestamp ?? 0) - scrollLeft}
+          containerRef={containerRef}
+        />
+      )}
+
+      {selectedKeyframeIds.length > 1 && (
+        <MultiKeyframeInspector
+          keyframeIds={selectedKeyframeIds}
           containerRef={containerRef}
         />
       )}

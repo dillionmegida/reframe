@@ -211,7 +211,7 @@ function EditorContent() {
   const project = useEditorStore((s) => s.project)
   const isPlaying = useEditorStore((s) => s.isPlaying)
   const currentTime = useEditorStore((s) => s.currentTime)
-  const selectedKeyframeId = useEditorStore((s) => s.selectedKeyframeId)
+  const selectedKeyframeIds = useEditorStore((s) => s.selectedKeyframeIds)
   const selectedSliceId = useEditorStore((s) => s.selectedSliceId)
   const setPlaying = useEditorStore((s) => s.setPlaying)
   const setCurrentTime = useEditorStore((s) => s.setCurrentTime)
@@ -346,15 +346,17 @@ function EditorContent() {
           deleteSlice(selectedSliceId)
           return
         }
-        if (selectedKeyframeId) {
-          deleteKeyframe(selectedKeyframeId)
+        if (selectedKeyframeIds.length > 0) {
+          // Delete all selected keyframes
+          selectedKeyframeIds.forEach((id) => deleteKeyframe(id))
         }
         return
       }
 
       if (e.code === 'KeyC' && !e.metaKey && !e.ctrlKey) {
-        if (selectedKeyframeId) {
-          cloneKeyframeMinus(selectedKeyframeId)
+        // Only clone if single keyframe selected
+        if (selectedKeyframeIds.length === 1) {
+          cloneKeyframeMinus(selectedKeyframeIds[0])
         }
         return
       }
@@ -392,7 +394,7 @@ function EditorContent() {
       project,
       isPlaying,
       currentTime,
-      selectedKeyframeId,
+      selectedKeyframeIds,
       selectedSliceId,
       setPlaying,
       setCurrentTime,

@@ -46,7 +46,7 @@ interface EditorState {
   project: Project | null
   currentTime: number
   isPlaying: boolean
-  selectedKeyframeId: string | null
+  selectedKeyframeIds: string[]
   selectedSliceId: string | null
   past: UndoSnapshot[]
   future: UndoSnapshot[]
@@ -57,6 +57,8 @@ interface EditorState {
   setCurrentTime: (t: number) => void
   setPlaying: (v: boolean) => void
   selectKeyframe: (id: string | null) => void
+  selectKeyframes: (ids: string[]) => void
+  toggleKeyframeSelection: (id: string, isCmd: boolean, isShift: boolean) => void
 
   addOrUpdateKeyframe: (kf: Omit<Keyframe, 'id'> & { explicitScale?: boolean }) => void
   updateKeyframe: (id: string, patch: Partial<Keyframe>) => void
@@ -117,7 +119,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   project: null,
   currentTime: 0,
   isPlaying: false,
-  selectedKeyframeId: null,
+  selectedKeyframeIds: [],
   selectedSliceId: null,
   past: [],
   future: [],
@@ -145,7 +147,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       project: p,
       currentTime: storedPlayhead,
       isPlaying: false,
-      selectedKeyframeId: null,
+      selectedKeyframeIds: [],
       selectedSliceId: null,
       past: [],
       future: [],
@@ -172,7 +174,42 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
   },
 
-  selectKeyframe: (id) => set({ selectedKeyframeId: id }),
+  selectKeyframe: (id) => set({ selectedKeyframeIds: id ? [id] : [] }),
+
+  selectKeyframes: (ids) => set({ selectedKeyframeIds: ids }),
+
+  toggleKeyframeSelection: (id, isCmd, isShift) => {
+    const { project, selectedKeyframeIds } = get()
+    if (!project) return
+
+    if (isShift && selectedKeyframeIds.length > 0) {
+      // Range selection: select all keyframes between last selected and current
+      const sortedKeyframes = sortKeyframes([...project.keyframes])
+      const lastSelectedId = selectedKeyframeIds[selectedKeyframeIds.length - 1]
+      const lastIndex = sortedKeyframes.findIndex((kf) => kf.id === lastSelectedId)
+      const currentIndex = sortedKeyframes.findIndex((kf) => kf.id === id)
+      
+      if (lastIndex !== -1 && currentIndex !== -1) {
+        const start = Math.min(lastIndex, currentIndex)
+        const end = Math.max(lastIndex, currentIndex)
+        const rangeIds = sortedKeyframes.slice(start, end + 1).map((kf) => kf.id)
+        
+        // Merge with existing selection
+        const newSelection = [...new Set([...selectedKeyframeIds, ...rangeIds])]
+        set({ selectedKeyframeIds: newSelection })
+      }
+    } else if (isCmd) {
+      // Toggle individual selection
+      if (selectedKeyframeIds.includes(id)) {
+        set({ selectedKeyframeIds: selectedKeyframeIds.filter((kfId) => kfId !== id) })
+      } else {
+        set({ selectedKeyframeIds: [...selectedKeyframeIds, id] })
+      }
+    } else {
+      // Single selection (replace)
+      set({ selectedKeyframeIds: [id] })
+    }
+  },
 
   addOrUpdateKeyframe: (kf) => {
     const { project, past } = get()
@@ -234,7 +271,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   deleteKeyframe: (id) => {
-    const { project, past, selectedKeyframeId } = get()
+    const { project, past, selectedKeyframeIds } = get()
     if (!project) return
 
     const newPast = pushUndo(past, project.keyframes, project.trim, project.slices)
@@ -247,7 +284,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       },
       past: newPast,
       future: [],
-      selectedKeyframeId: selectedKeyframeId === id ? null : selectedKeyframeId,
+      selectedKeyframeIds: selectedKeyframeIds.filter((kfId) => kfId !== id),
     })
   },
 
@@ -653,7 +690,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       project: null,
       currentTime: 0,
       isPlaying: false,
-      selectedKeyframeId: null,
+      selectedKeyframeIds: [],
       selectedSliceId: null,
       past: [],
       future: [],

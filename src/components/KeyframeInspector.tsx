@@ -163,6 +163,8 @@ export default function KeyframeInspector({ keyframeId, anchorX, containerRef }:
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
       if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        const target = e.target as HTMLElement
+        if (target.closest('[data-keyframe-dot]')) return
         selectKeyframe(null)
       }
     }
