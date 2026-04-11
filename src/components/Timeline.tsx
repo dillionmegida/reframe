@@ -279,7 +279,7 @@ const Playhead = styled.div<{ $x: number }>`
   background: rgba(249, 115, 22, 0.7);
   z-index: 25;
   pointer-events: none;
-  left: ${(p) => p.$x - 1}px;
+  left: ${(p) => p.$x}px;
 `
 
 const Controls = styled.div`
@@ -339,12 +339,25 @@ const ContextItem = styled.button`
   }
 `
 
+const SelectionBox = styled.div<{ $left: number; $top: number; $width: number; $height: number }>`
+  position: absolute;
+  border: 2px solid #f97316;
+  background: rgba(249, 115, 22, 0.1);
+  pointer-events: none;
+  z-index: 30;
+  left: ${(p) => p.$left}px;
+  top: ${(p) => p.$top}px;
+  width: ${(p) => p.$width}px;
+  height: ${(p) => p.$height}px;
+`
+
 export default function Timeline() {
   const project = useEditorStore((s) => s.project!)
   const currentTime = useEditorStore((s) => s.currentTime)
   const selectedKeyframeIds = useEditorStore((s) => s.selectedKeyframeIds)
   const setCurrentTime = useEditorStore((s) => s.setCurrentTime)
   const selectKeyframe = useEditorStore((s) => s.selectKeyframe)
+  const selectKeyframes = useEditorStore((s) => s.selectKeyframes)
   const toggleKeyframeSelection = useEditorStore((s) => s.toggleKeyframeSelection)
   const updateKeyframe = useEditorStore((s) => s.updateKeyframe)
   const deleteKeyframe = useEditorStore((s) => s.deleteKeyframe)
@@ -365,6 +378,7 @@ export default function Timeline() {
 
   const containerRef = useRef<HTMLDivElement>(null)
   const filmstripRef = useRef<HTMLDivElement>(null)
+  const trackAreaRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const thumbVideoRef = useRef<HTMLVideoElement>(null)
   const [thumbnails, setThumbnails] = useState<string[]>([])
@@ -379,6 +393,8 @@ export default function Timeline() {
     return 1
   })
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; kfId: string } | null>(null)
+  const [dragBox, setDragBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null)
+  const [draggingOverIds, setDraggingOverIds] = useState<string[]>([])
 
   const duration = project.videoDuration
   const trim = project.trim
@@ -481,27 +497,139 @@ export default function Timeline() {
     }
   }, [project.videoPath, duration])
 
-  const handleFilmstripMouseDown = useCallback(
+  const computeIdsInBox = useCallback(
+    (boxLeft: number, boxRight: number, boxTop: number, boxBottom: number) => {
+      const kfs = useEditorStore.getState().project?.keyframes ?? []
+      // kfY: keyframes sit at 50% of TrackArea height (top: 50% in CSS)
+      const trackAreaH = trackAreaRef.current?.offsetHeight ?? 60
+      const kfY = trackAreaH / 2
+      // half-size of the keyframe diamond for overlap check
+      const kfHalf = 6
+      const ids: string[] = []
+      kfs.forEach((kf) => {
+        const kfX = timeToX(kf.timestamp)
+        if (
+          kfX >= boxLeft &&
+          kfX <= boxRight &&
+          boxTop <= kfY + kfHalf &&
+          boxBottom >= kfY - kfHalf
+        ) {
+          ids.push(kf.id)
+        }
+      })
+      return ids
+    },
+    [timeToX]
+  )
+
+  const handleScrollAreaMouseDown = useCallback(
     (e: React.MouseEvent) => {
+      if (e.button !== 0) return
+      const target = e.target as HTMLElement
+
+      // ── Keyframe dot: start reposition drag ──────────────────────────────
+      const kfDot = target.closest('[data-keyframe-dot]') as HTMLElement | null
+      if (kfDot) {
+        const kfId = kfDot.getAttribute('data-keyframe-id')
+        if (!kfId) return
+        const sc = scrollContainerRef.current
+        if (!sc) return
+        const rect = sc.getBoundingClientRect()
+        let moved = false
+        const onMouseMove = (ev: MouseEvent) => {
+          moved = true
+          const newT = xToTime(ev.clientX - rect.left + sc.scrollLeft)
+          updateKeyframe(kfId, { timestamp: Math.max(trim.start, Math.min(trim.end, newT)) })
+        }
+        const onMouseUp = () => {
+          document.removeEventListener('mousemove', onMouseMove)
+          document.removeEventListener('mouseup', onMouseUp)
+          // If the mouse barely moved, treat as click — selection handled by onClick
+          if (moved) selectKeyframe(kfId)
+        }
+        document.addEventListener('mousemove', onMouseMove)
+        document.addEventListener('mouseup', onMouseUp)
+        return
+      }
+
+      // ── Slice handles and other interactive children handle themselves ────
+      if (target.closest('[data-slice-handle]')) return
+      if (target.closest('[data-untracked]')) return
+
+      // ── Empty area: click-to-seek  OR  drag-to-select ───────────────────
       const sc = scrollContainerRef.current
       if (!sc) return
-      const rect = sc.getBoundingClientRect()
-      const t = xToTime(e.clientX - rect.left + sc.scrollLeft)
-      setCurrentTime(t)
-      selectSlice(null)
+      const scRect = sc.getBoundingClientRect()
+      const isCmd = e.metaKey || e.ctrlKey
+      const startClientX = e.clientX
+      const startClientY = e.clientY
+
+      // X in filmstrip space; Y in TrackArea space (direct from trackAreaRef)
+      const trackRect = trackAreaRef.current?.getBoundingClientRect()
+      const startFX = startClientX - scRect.left + sc.scrollLeft
+      const startFY = startClientY - (trackRect?.top ?? scRect.top)
+
+      let isDragging = false
+
+      const updateBox = (ev: MouseEvent) => {
+        const currFX = ev.clientX - scRect.left + sc.scrollLeft
+        const currFY = ev.clientY - (trackAreaRef.current?.getBoundingClientRect().top ?? scRect.top)
+        const boxLeft = Math.min(startFX, currFX)
+        const boxRight = Math.max(startFX, currFX)
+        const boxTop = Math.min(startFY, currFY)
+        const boxBottom = Math.max(startFY, currFY)
+        setDragBox({ left: boxLeft, top: boxTop, width: boxRight - boxLeft, height: boxBottom - boxTop })
+        setDraggingOverIds(computeIdsInBox(boxLeft, boxRight, boxTop, boxBottom))
+      }
 
       const onMouseMove = (ev: MouseEvent) => {
-        const newT = xToTime(ev.clientX - rect.left + sc.scrollLeft)
-        setCurrentTime(Math.max(0, Math.min(duration, newT)))
+        const dx = Math.abs(ev.clientX - startClientX)
+        const dy = Math.abs(ev.clientY - startClientY)
+        if (!isDragging && (dx > 4 || dy > 4)) isDragging = true
+        if (isDragging) updateBox(ev)
       }
-      const onMouseUp = () => {
+
+      const onMouseUp = (ev: MouseEvent) => {
         document.removeEventListener('mousemove', onMouseMove)
         document.removeEventListener('mouseup', onMouseUp)
+
+        if (!isDragging) {
+          // Plain click: seek
+          const t = xToTime(ev.clientX - scRect.left + sc.scrollLeft)
+          setCurrentTime(Math.max(0, Math.min(duration, t)))
+          selectSlice(null)
+          selectKeyframes([])
+        } else {
+          // End of drag: commit selection
+          const currFX = ev.clientX - scRect.left + sc.scrollLeft
+          const currFY = ev.clientY - (filmstripRef.current?.getBoundingClientRect().top ?? scRect.top)
+          const boxLeft = Math.min(startFX, currFX)
+          const boxRight = Math.max(startFX, currFX)
+          const boxTop = Math.min(startFY, currFY)
+          const boxBottom = Math.max(startFY, currFY)
+          const ids = computeIdsInBox(boxLeft, boxRight, boxTop, boxBottom)
+
+          if (isCmd) {
+            const current = useEditorStore.getState().selectedKeyframeIds
+            const merged = [...current]
+            ids.forEach((id) => {
+              const idx = merged.indexOf(id)
+              if (idx >= 0) merged.splice(idx, 1)
+              else merged.push(id)
+            })
+            selectKeyframes(merged)
+          } else {
+            selectKeyframes(ids)
+          }
+        }
+        setDragBox(null)
+        setDraggingOverIds([])
       }
+
       document.addEventListener('mousemove', onMouseMove)
       document.addEventListener('mouseup', onMouseUp)
     },
-    [xToTime, setCurrentTime, selectSlice, duration]
+    [xToTime, setCurrentTime, selectSlice, selectKeyframe, selectKeyframes, duration, trim, updateKeyframe, computeIdsInBox]
   )
 
   const handleSliceHandleDrag = useCallback(
@@ -553,30 +681,6 @@ export default function Timeline() {
       setCurrentTime(t)
     },
     [xToTime, selectSlice, setCurrentTime]
-  )
-
-  const handleKeyframeDragStart = useCallback(
-    (e: React.MouseEvent, kfId: string) => {
-      e.stopPropagation()
-      selectKeyframe(kfId)
-
-      const sc = scrollContainerRef.current
-      if (!sc) return
-      const rect = sc.getBoundingClientRect()
-
-      const onMouseMove = (ev: MouseEvent) => {
-        const newT = xToTime(ev.clientX - rect.left + sc.scrollLeft)
-        const clamped = Math.max(trim.start, Math.min(trim.end, newT))
-        updateKeyframe(kfId, { timestamp: clamped })
-      }
-      const onMouseUp = () => {
-        document.removeEventListener('mousemove', onMouseMove)
-        document.removeEventListener('mouseup', onMouseUp)
-      }
-      document.addEventListener('mousemove', onMouseMove)
-      document.addEventListener('mouseup', onMouseUp)
-    },
-    [xToTime, trim, selectKeyframe, updateKeyframe]
   )
 
   const handleTrimDrag = useCallback(
@@ -651,7 +755,7 @@ export default function Timeline() {
     <Container ref={containerRef}>
       <video ref={thumbVideoRef} style={{ display: 'none' }} muted playsInline />
 
-      <ScrollArea ref={scrollContainerRef} onMouseDown={handleFilmstripMouseDown}>
+      <ScrollArea ref={scrollContainerRef} onMouseDown={handleScrollAreaMouseDown}>
         <Filmstrip ref={filmstripRef} $width={filmstripWidth}>
           <PlayheadLine $x={timeToX(currentTime)} />
 
@@ -665,7 +769,7 @@ export default function Timeline() {
             <PlayheadLabel $x={timeToX(currentTime)}>{formatTime(currentTime)}</PlayheadLabel>
           </Ruler>
 
-          <TrackArea>
+          <TrackArea ref={trackAreaRef}>
             {thumbnails.map((thumb, i) =>
               thumb ? <ThumbImage key={i} src={thumb} alt="" $left={i * thumbWidthPx} $width={thumbWidthPx} /> : null
             )}
@@ -772,7 +876,7 @@ export default function Timeline() {
 
             {project.keyframes.map((kf) => {
               const isActive = Math.abs(currentTime - kf.timestamp) < 0.1
-              const isSelected = selectedKeyframeIds.includes(kf.id)
+              const isSelected = selectedKeyframeIds.includes(kf.id) || draggingOverIds.includes(kf.id)
               const size = isActive ? 12 : 10
 
               return (
@@ -782,6 +886,7 @@ export default function Timeline() {
                   $active={isActive}
                   $selected={isSelected}
                   data-keyframe-dot
+                  data-keyframe-id={kf.id}
                   style={{
                     left: timeToX(kf.timestamp) - size / 2,
                   }}
@@ -798,6 +903,15 @@ export default function Timeline() {
             })}
 
             <Playhead $x={timeToX(currentTime)} />
+
+            {dragBox && (
+              <SelectionBox
+                $left={dragBox.left}
+                $top={dragBox.top}
+                $width={dragBox.width}
+                $height={dragBox.height}
+              />
+            )}
           </TrackArea>
         </Filmstrip>
       </ScrollArea>
@@ -823,7 +937,7 @@ export default function Timeline() {
         </ZoomRow>
       </Controls>
 
-      {selectedKeyframeIds.length === 1 && (
+      {selectedKeyframeIds.length === 1 && !dragBox && (
         <KeyframeInspector
           keyframeId={selectedKeyframeIds[0]}
           anchorX={timeToX(project.keyframes.find((k) => k.id === selectedKeyframeIds[0])?.timestamp ?? 0) - scrollLeft}
@@ -831,7 +945,7 @@ export default function Timeline() {
         />
       )}
 
-      {selectedKeyframeIds.length > 1 && (
+      {selectedKeyframeIds.length > 1 && !dragBox && (
         <MultiKeyframeInspector
           keyframeIds={selectedKeyframeIds}
           containerRef={containerRef}
