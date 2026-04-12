@@ -906,7 +906,7 @@ export default function Timeline() {
   }, [duration, tickInterval])
 
   return (
-    <Container ref={containerRef}>
+    <Container ref={containerRef} data-testid="timeline">
       <video ref={thumbVideoRef} style={{ display: 'none' }} muted playsInline />
 
       <ScrollArea ref={scrollContainerRef} onMouseDown={handleScrollAreaMouseDown}>

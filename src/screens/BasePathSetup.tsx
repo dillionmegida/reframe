@@ -175,10 +175,10 @@ export default function BasePathSetup() {
         <FormGroup>
           <Label>Base Folder</Label>
           <InputRow>
-            <PathDisplay>
+            <PathDisplay data-testid="base-path-display">
               {selectedPath || 'No folder selected'}
             </PathDisplay>
-            <BrowseButton onClick={handleSelectDirectory}>
+            <BrowseButton onClick={handleSelectDirectory} data-testid="browse-button">
               Browse
             </BrowseButton>
           </InputRow>
@@ -191,6 +191,7 @@ export default function BasePathSetup() {
           onClick={handleConfirm}
           disabled={!selectedPath}
           $enabled={!!selectedPath}
+          data-testid="confirm-base-path-button"
         >
           Continue
         </ConfirmButton>
