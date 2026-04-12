@@ -58,6 +58,7 @@ function saveAppData(data: any): void {
 }
 
 function createWindow() {
+  const isHeadless = process.env.HEADLESS_E2E === '1'
   const { width: screenW, height: screenH } = screen.getPrimaryDisplay().workAreaSize
 
   mainWindow = new BrowserWindow({
@@ -68,6 +69,7 @@ function createWindow() {
     backgroundColor: '#0e0e0e',
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 16, y: 16 },
+    show: !isHeadless,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -75,6 +77,12 @@ function createWindow() {
       webSecurity: false,
     },
   })
+
+  if (isHeadless) {
+    mainWindow.once('ready-to-show', () => {
+      if (mainWindow) mainWindow.hide()
+    })
+  }
 
   if (process.env.NODE_ENV === 'development' || process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL || 'http://localhost:8000')

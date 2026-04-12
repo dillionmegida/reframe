@@ -91,6 +91,7 @@ export default function Playback() {
           setPlaying(!isPlaying)
         }}
         title="Play/Pause (Space)"
+        data-testid="play-button"
       >
         {isPlaying ? (
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">

@@ -381,10 +381,10 @@ export default function Toolbar({
       <Spacer />
 
       <div style={{ display: 'flex', gap: '0.25rem', WebkitAppRegion: 'no-drag' } as any}>
-        <HistoryButton $enabled={past.length > 0} onClick={undo} disabled={past.length === 0} title="Undo (Cmd+Z)">
+        <HistoryButton $enabled={past.length > 0} onClick={undo} disabled={past.length === 0} title="Undo (Cmd+Z)" data-testid="undo-button">
           ↩
         </HistoryButton>
-        <HistoryButton $enabled={future.length > 0} onClick={redo} disabled={future.length === 0} title="Redo (Cmd+Shift+Z)">
+        <HistoryButton $enabled={future.length > 0} onClick={redo} disabled={future.length === 0} title="Redo (Cmd+Shift+Z)" data-testid="redo-button">
           ↪
         </HistoryButton>
       </div>
@@ -450,6 +450,7 @@ export default function Toolbar({
         disabled={!hasExportableSlices}
         $enabled={hasExportableSlices}
         style={{ WebkitAppRegion: 'no-drag' } as any}
+        data-testid="export-button"
       >
         {hasExportableSlices
           ? `Export ${exportableSlices.length} Slice${exportableSlices.length !== 1 ? 's' : ''}`
