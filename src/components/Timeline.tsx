@@ -50,7 +50,9 @@ const ScrollArea = styled.div`
 
 const Filmstrip = styled.div`
   position: relative;
-  min-height: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 `
 
 const PlayheadLine = styled.div`
@@ -106,15 +108,18 @@ const PlayheadLabel = styled.div`
 
 const TrackArea = styled.div`
   position: relative;
-  height: calc(100% - 18px);
+  flex: 1;
+  min-height: 0;
 `
 
-const ThumbImage = styled.img`
+const FilmstripCanvas = styled.canvas`
   position: absolute;
-  top: 0;
-  height: 100%;
-  object-fit: cover;
+  top: 22px;
+  left: 0;
+  width: 100%;
+  height: calc(100% - 22px);
   pointer-events: none;
+  z-index: 1;
 `
 
 const DimOverlay = styled.div`
@@ -157,11 +162,11 @@ const SliceBg = styled.div<{ $selected: boolean; $hidden: boolean }>`
   position: absolute;
   inset: 0;
   cursor: pointer;
-  background: ${(p) => (p.$hidden ? 'rgba(255,255,255,0.05)' : 'rgba(74,222,128,0.15)')};
+  background: ${(p) => (p.$hidden ? 'rgba(255,255,255,0.08)' : 'rgba(249,115,22,0.25)')};
   border-top: 2px solid
-    ${(p) => (p.$selected ? 'rgba(74,222,128,0.8)' : 'rgba(74,222,128,0.3)')};
+    ${(p) => (p.$selected ? 'rgba(249,115,22,1)' : 'rgba(249,115,22,0.6)')};
   border-bottom: 2px solid
-    ${(p) => (p.$selected ? 'rgba(74,222,128,0.8)' : 'rgba(74,222,128,0.3)')};
+    ${(p) => (p.$selected ? 'rgba(249,115,22,1)' : 'rgba(249,115,22,0.6)')};
   opacity: ${(p) => (p.$hidden ? 0.5 : 1)};
 `
 
@@ -244,7 +249,7 @@ const KeyframeDot = styled.div<{ $size: number; $active: boolean; $selected: boo
   width: ${(p) => p.$size}px;
   height: ${(p) => p.$size}px;
   margin-top: ${(p) => -p.$size / 2}px;
-  top: 50%;
+  top: 0;
   left: 0;
   cursor: pointer;
 
@@ -363,7 +368,10 @@ export default function Timeline() {
   const trackAreaRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const thumbVideoRef = useRef<HTMLVideoElement>(null)
-  const [thumbnails, setThumbnails] = useState<string[]>([])
+  const filmstripCanvasRef = useRef<HTMLCanvasElement>(null)
+  const thumbImagesRef = useRef<Map<string, HTMLImageElement>>(new Map())
+  const thumbRequestIdRef = useRef(0)
+  const [thumbVersion, setThumbVersion] = useState(0)
   const [viewportWidth, setViewportWidth] = useState(0)
   const [scrollLeft, setScrollLeft] = useState(0)
   const [zoom, setZoom] = useState(() => {
@@ -453,46 +461,197 @@ export default function Timeline() {
   const timeToX = useCallback((t: number) => (filmstripWidth > 0 ? (t / duration) * filmstripWidth : 0), [filmstripWidth, duration])
   const xToTime = useCallback((x: number) => (filmstripWidth > 0 ? (x / filmstripWidth) * duration : 0), [filmstripWidth, duration])
 
+  // Time-based grouping: compute a capture interval so ~1 thumb per 80px of timeline
+  const THUMB_RENDER_PX = 80
+  const captureInterval = useMemo(() => {
+    if (filmstripWidth <= 0 || duration <= 0) return 2
+    const secsPerPx = duration / filmstripWidth
+    const rawInterval = secsPerPx * THUMB_RENDER_PX
+    // Snap to nice intervals: 1, 2, 5, 10, 15, 30, 60...
+    const nice = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300]
+    return nice.find((n) => n >= rawInterval) ?? Math.ceil(rawInterval / 60) * 60
+  }, [filmstripWidth, duration])
+
+  const THUMB_BUFFER_PX = Math.max(viewportWidth * 0.5, THUMB_RENDER_PX * 4)
+  const visibleThumbRegionLeft = Math.max(0, scrollLeft - THUMB_BUFFER_PX)
+  const visibleThumbRegionWidth = Math.max(
+    0,
+    Math.min(filmstripWidth - visibleThumbRegionLeft, viewportWidth + THUMB_BUFFER_PX * 2)
+  )
+  const visibleThumbSpecs = useMemo(() => {
+    if (duration <= 0 || filmstripWidth <= 0 || visibleThumbRegionWidth <= 0) return []
+    const slotWidthPx = (captureInterval / duration) * filmstripWidth
+    const startTime = Math.max(0, Math.floor(xToTime(visibleThumbRegionLeft) / captureInterval) * captureInterval)
+    const endTime = Math.min(duration, xToTime(visibleThumbRegionLeft + visibleThumbRegionWidth) + captureInterval)
+
+    const specs: { key: string; time: number; left: number; width: number }[] = []
+    for (let t = startTime; t < endTime; t += captureInterval) {
+      const left = timeToX(t)
+      const right = timeToX(Math.min(t + captureInterval, duration))
+      specs.push({
+        key: t.toFixed(2),
+        time: t,
+        left,
+        width: right - left,
+      })
+    }
+    return specs
+  }, [duration, filmstripWidth, visibleThumbRegionLeft, visibleThumbRegionWidth, captureInterval, xToTime, timeToX])
+
+  useEffect(() => {
+    thumbImagesRef.current.clear()
+    setThumbVersion((v) => v + 1)
+  }, [project.videoPath])
+
   useEffect(() => {
     const video = thumbVideoRef.current
     if (!video || !project.videoPath) return
-
     video.src = `file://${project.videoPath}`
     video.preload = 'auto'
+  }, [project.videoPath])
 
-    const canvas = document.createElement('canvas')
-    canvas.width = 160
-    canvas.height = 90
-    const ctx = canvas.getContext('2d')!
+  useEffect(() => {
+    const video = thumbVideoRef.current
+    if (!video || !project.videoPath || visibleThumbSpecs.length === 0) return
 
-    const thumbCount = Math.ceil(duration / 2)
-    const thumbs: string[] = new Array(thumbCount).fill('')
-    let idx = 0
+    const pendingByKey = new Map<string, number>()
+    visibleThumbSpecs.forEach((spec) => {
+      if (!thumbImagesRef.current.has(spec.key) && !pendingByKey.has(spec.key)) {
+        pendingByKey.set(spec.key, spec.time)
+      }
+    })
 
-    const extractNext = () => {
-      if (idx >= thumbCount) {
-        setThumbnails([...thumbs])
+    const pendingSpecs = Array.from(pendingByKey, ([key, time]) => ({ key, time }))
+    if (pendingSpecs.length === 0) return
+
+    let cancelled = false
+    const requestId = ++thumbRequestIdRef.current
+
+    const captureCanvas = document.createElement('canvas')
+    captureCanvas.width = 480
+    captureCanvas.height = 270
+    const captureCtx = captureCanvas.getContext('2d')
+    if (!captureCtx) return
+
+    let index = 0
+
+    const storeFrame = () => {
+      if (cancelled || requestId !== thumbRequestIdRef.current || index >= pendingSpecs.length) return
+      const spec = pendingSpecs[index]
+
+      try {
+        captureCtx.drawImage(video, 0, 0, 480, 270)
+        const dataUrl = captureCanvas.toDataURL('image/jpeg', 0.9)
+        const img = new Image()
+        img.decoding = 'async'
+        img.src = dataUrl
+        thumbImagesRef.current.set(spec.key, img)
+
+        if (img.complete) {
+          setThumbVersion((v) => v + 1)
+        } else {
+          const handleLoad = () => {
+            img.removeEventListener('load', handleLoad)
+            if (!cancelled && requestId === thumbRequestIdRef.current) {
+              setThumbVersion((v) => v + 1)
+            }
+          }
+          img.addEventListener('load', handleLoad)
+        }
+      } catch {
+      }
+
+      index += 1
+      captureNext()
+    }
+
+    const captureNext = () => {
+      if (cancelled || requestId !== thumbRequestIdRef.current || index >= pendingSpecs.length) return
+      const targetTime = pendingSpecs[index].time
+
+      if (Math.abs(video.currentTime - targetTime) < 0.01) {
+        storeFrame()
         return
       }
-      const targetTime = idx * 2
+
       video.currentTime = targetTime
     }
 
     const onSeeked = () => {
-      ctx.drawImage(video, 0, 0, 160, 90)
-      thumbs[idx] = canvas.toDataURL('image/jpeg', 0.6)
-      if (idx % 5 === 0) setThumbnails([...thumbs])
-      idx++
-      extractNext()
+      storeFrame()
+    }
+
+    const onReady = () => {
+      captureNext()
+    }
+
+    const onError = () => {
+      console.error('[Timeline thumbnails] Video load error:', video.error)
     }
 
     video.addEventListener('seeked', onSeeked)
-    video.addEventListener('loadedmetadata', () => extractNext())
+    video.addEventListener('error', onError)
+
+    if (video.readyState >= 1) {
+      onReady()
+    } else {
+      video.addEventListener('loadedmetadata', onReady)
+    }
 
     return () => {
+      cancelled = true
       video.removeEventListener('seeked', onSeeked)
+      video.removeEventListener('loadedmetadata', onReady)
+      video.removeEventListener('error', onError)
     }
-  }, [project.videoPath, duration])
+  }, [project.videoPath, visibleThumbSpecs])
+
+  useEffect(() => {
+    const canvas = filmstripCanvasRef.current
+    const trackArea = trackAreaRef.current
+    if (!canvas) return
+
+    if (!trackArea || visibleThumbRegionWidth <= 0 || visibleThumbSpecs.length === 0) {
+      canvas.width = 0
+      canvas.height = 0
+      return
+    }
+
+    const trackH = trackArea.getBoundingClientRect().height
+    const canvasHeight = Math.max(0, trackH - 22)
+    if (canvasHeight <= 0) return
+
+    const dpr = window.devicePixelRatio || 1
+    canvas.width = Math.max(1, Math.round(visibleThumbRegionWidth * dpr))
+    canvas.height = Math.max(1, Math.round(canvasHeight * dpr))
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.clearRect(0, 0, visibleThumbRegionWidth, canvasHeight)
+
+    visibleThumbSpecs.forEach((spec) => {
+      const img = thumbImagesRef.current.get(spec.key)
+      if (!img || !img.complete || !img.naturalWidth) return
+      const drawX = spec.left - visibleThumbRegionLeft
+      const drawW = spec.width + 0.75
+
+      // object-fit: cover — crop source to match destination aspect ratio
+      const srcAspect = img.naturalWidth / img.naturalHeight
+      const dstAspect = drawW / canvasHeight
+      let sx = 0, sy = 0, sw = img.naturalWidth, sh = img.naturalHeight
+      if (srcAspect > dstAspect) {
+        // source is wider — crop horizontally
+        sw = img.naturalHeight * dstAspect
+        sx = (img.naturalWidth - sw) / 2
+      } else {
+        // source is taller — crop vertically
+        sh = img.naturalWidth / dstAspect
+        sy = (img.naturalHeight - sh) / 2
+      }
+      ctx.drawImage(img, sx, sy, sw, sh, drawX, 0, drawW, canvasHeight)
+    })
+  }, [thumbVersion, visibleThumbRegionLeft, visibleThumbRegionWidth, visibleThumbSpecs])
 
   const computeIdsInBox = useCallback(
     (boxLeft: number, boxRight: number, boxTop: number, boxBottom: number) => {
@@ -738,8 +897,6 @@ export default function Timeline() {
     }
   }, [contextMenu])
 
-  const thumbWidthPx = filmstripWidth > 0 ? (2 / duration) * filmstripWidth : 0
-
   const ticks = useMemo(() => {
     const arr: number[] = []
     for (let t = 0; t <= duration; t += tickInterval) {
@@ -767,9 +924,7 @@ export default function Timeline() {
           </Ruler>
 
           <TrackArea ref={trackAreaRef}>
-            {thumbnails.map((thumb, i) =>
-              thumb ? <ThumbImage key={i} src={thumb} alt="" style={{ left: i * thumbWidthPx, width: thumbWidthPx }} /> : null
-            )}
+            <FilmstripCanvas ref={filmstripCanvasRef} style={{ left: visibleThumbRegionLeft, width: visibleThumbRegionWidth }} />
 
             <DimOverlay style={{ left: 0, width: timeToX(trim.start) }} />
             <DimOverlay style={{ left: timeToX(trim.end), width: Math.max(0, filmstripWidth - timeToX(trim.end)) }} />
