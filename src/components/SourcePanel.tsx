@@ -113,6 +113,7 @@ export default function SourcePanel({
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const seekingRef = useRef(false)
   const [isDragging, setIsDragging] = useState(false)
   const [isResizing, setIsResizing] = useState(false)
   const [disableTransition, setDisableTransition] = useState(true)
@@ -178,7 +179,13 @@ export default function SourcePanel({
     // When playing, only sync if there's a large difference (user clicked timeline)
     const threshold = isPlaying ? 0.5 : 0.05
     if (Math.abs(video.currentTime - currentTime) > threshold) {
+      seekingRef.current = true
       video.currentTime = currentTime
+      const onSeeked = () => {
+        seekingRef.current = false
+        video.removeEventListener('seeked', onSeeked)
+      }
+      video.addEventListener('seeked', onSeeked)
     }
   }, [currentTime, isPlaying])
 
@@ -215,6 +222,10 @@ export default function SourcePanel({
 
     const tickRaf = () => {
       if (stopped || !video || video.paused) return
+      if (seekingRef.current) {
+        playbackRafRef.current = requestAnimationFrame(tickRaf)
+        return
+      }
       const t = video.currentTime
       if (t >= project.trim.end) {
         video.pause()
@@ -228,6 +239,10 @@ export default function SourcePanel({
 
     const tickVfc = (_now: number, meta: { mediaTime: number }) => {
       if (stopped) return
+      if (seekingRef.current) {
+        playbackVfcRef.current = (video as any).requestVideoFrameCallback(tickVfc)
+        return
+      }
       const t = meta.mediaTime
       if (t >= project.trim.end) {
         video.pause()

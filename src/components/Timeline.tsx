@@ -48,20 +48,18 @@ const ScrollArea = styled.div`
   pointer-events: auto;
 `
 
-const Filmstrip = styled.div<{ $width: number }>`
+const Filmstrip = styled.div`
   position: relative;
   min-height: 100%;
-  width: ${(p) => p.$width}px;
 `
 
-const PlayheadLine = styled.div<{ $x: number }>`
+const PlayheadLine = styled.div`
   pointer-events: none;
   position: absolute;
   top: 0;
   bottom: 0;
   width: 2px;
   background: rgba(249, 115, 22, 0.4);
-  left: ${(p) => p.$x - 1}px;
   z-index: 22;
 `
 
@@ -72,10 +70,9 @@ const Ruler = styled.div`
   border-bottom: 1px solid rgba(42, 42, 42, 0.5);
 `
 
-const Tick = styled.div<{ $x: number }>`
+const Tick = styled.div`
   position: absolute;
   top: 0;
-  left: ${(p) => p.$x}px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -95,10 +92,9 @@ const TickLabel = styled.span`
   margin-top: 2px;
 `
 
-const PlayheadLabel = styled.div<{ $x: number }>`
+const PlayheadLabel = styled.div`
   position: absolute;
   top: -2px;
-  left: ${(p) => p.$x}px;
   transform: translateX(-50%);
   background: #f97316;
   color: #000;
@@ -113,28 +109,24 @@ const TrackArea = styled.div`
   height: calc(100% - 18px);
 `
 
-const ThumbImage = styled.img<{ $left: number; $width: number }>`
+const ThumbImage = styled.img`
   position: absolute;
   top: 0;
   height: 100%;
   object-fit: cover;
   pointer-events: none;
-  left: ${(p) => p.$left}px;
-  width: ${(p) => p.$width}px;
 `
 
-const DimOverlay = styled.div<{ $left: number; $width: number }>`
+const DimOverlay = styled.div`
   position: absolute;
   top: 0;
   height: 100%;
   background: rgba(0, 0, 0, 0.6);
   pointer-events: none;
   z-index: 10;
-  left: ${(p) => p.$left}px;
-  width: ${(p) => p.$width}px;
 `
 
-const TrimHandle = styled.div<{ $x: number }>`
+const TrimHandle = styled.div`
   position: absolute;
   top: 0;
   height: 100%;
@@ -145,7 +137,6 @@ const TrimHandle = styled.div<{ $x: number }>`
   display: flex;
   align-items: center;
   justify-content: center;
-  left: ${(p) => p.$x - 3}px;
 `
 
 const TrimHandleInner = styled.div`
@@ -155,12 +146,10 @@ const TrimHandleInner = styled.div`
   border-radius: 9999px;
 `
 
-const SliceWrapper = styled.div<{ $left: number; $width: number }>`
+const SliceWrapper = styled.div`
   position: absolute;
   top: 0;
   height: 20px;
-  left: ${(p) => p.$left}px;
-  width: ${(p) => p.$width}px;
   z-index: 15;
 `
 
@@ -237,15 +226,13 @@ const HiddenLabel = styled.span`
   font-family: 'IBM Plex Mono', monospace;
 `
 
-const UntrackedOverlay = styled.div<{ $left: number; $width: number }>`
+const UntrackedOverlay = styled.div`
   position: absolute;
   top: 0;
   height: 100%;
   background: rgba(251, 146, 60, 0.4);
   cursor: pointer;
   z-index: 18;
-  left: ${(p) => p.$left}px;
-  width: ${(p) => p.$width}px;
 `
 
 const KeyframeDot = styled.div<{ $size: number; $active: boolean; $selected: boolean }>`
@@ -271,7 +258,7 @@ const KeyframeDot = styled.div<{ $size: number; $active: boolean; $selected: boo
   }
 `
 
-const Playhead = styled.div<{ $x: number }>`
+const Playhead = styled.div`
   position: absolute;
   top: 0;
   height: 100%;
@@ -279,7 +266,6 @@ const Playhead = styled.div<{ $x: number }>`
   background: rgba(249, 115, 22, 0.7);
   z-index: 25;
   pointer-events: none;
-  left: ${(p) => p.$x}px;
 `
 
 const Controls = styled.div`
@@ -339,16 +325,12 @@ const ContextItem = styled.button`
   }
 `
 
-const SelectionBox = styled.div<{ $left: number; $top: number; $width: number; $height: number }>`
+const SelectionBox = styled.div`
   position: absolute;
   border: 2px solid #f97316;
   background: rgba(249, 115, 22, 0.1);
   pointer-events: none;
   z-index: 30;
-  left: ${(p) => p.$left}px;
-  top: ${(p) => p.$top}px;
-  width: ${(p) => p.$width}px;
-  height: ${(p) => p.$height}px;
 `
 
 export default function Timeline() {
@@ -392,6 +374,7 @@ export default function Timeline() {
     }
     return 1
   })
+  const prevZoomRef = useRef(zoom)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; kfId: string } | null>(null)
   const [dragBox, setDragBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null)
   const [draggingOverIds, setDraggingOverIds] = useState<string[]>([])
@@ -423,6 +406,20 @@ export default function Timeline() {
       window.localStorage.setItem(`timelineZoom.${project.id}`, zoom.toString())
     }
   }, [zoom, project.id])
+
+  useEffect(() => {
+    const sc = scrollContainerRef.current
+    if (!sc || filmstripWidth <= 0) return
+    const prevZoom = prevZoomRef.current
+    if (prevZoom === zoom) return
+    prevZoomRef.current = zoom
+    const prevFilmstripWidth = viewportWidth * prevZoom
+    const playheadX = (currentTime / duration) * prevFilmstripWidth
+    const viewportFraction = (playheadX - sc.scrollLeft) / sc.clientWidth
+    const newPlayheadX = (currentTime / duration) * filmstripWidth
+    sc.scrollLeft = newPlayheadX - viewportFraction * sc.clientWidth
+    setScrollLeft(sc.scrollLeft)
+  }, [zoom, filmstripWidth, viewportWidth, currentTime, duration])
 
   useEffect(() => {
     const sc = scrollContainerRef.current
@@ -756,31 +753,31 @@ export default function Timeline() {
       <video ref={thumbVideoRef} style={{ display: 'none' }} muted playsInline />
 
       <ScrollArea ref={scrollContainerRef} onMouseDown={handleScrollAreaMouseDown}>
-        <Filmstrip ref={filmstripRef} $width={filmstripWidth}>
-          <PlayheadLine $x={timeToX(currentTime)} />
+        <Filmstrip ref={filmstripRef} style={{ width: filmstripWidth }}>
+          <PlayheadLine style={{ left: timeToX(currentTime) - 1 }} />
 
           <Ruler>
             {ticks.map((t) => (
-              <Tick key={t} $x={timeToX(t)}>
+              <Tick key={t} style={{ left: timeToX(t) }}>
                 <TickBar />
                 <TickLabel>{formatTime(t)}</TickLabel>
               </Tick>
             ))}
-            <PlayheadLabel $x={timeToX(currentTime)}>{formatTime(currentTime)}</PlayheadLabel>
+            <PlayheadLabel style={{ left: timeToX(currentTime) }}>{formatTime(currentTime)}</PlayheadLabel>
           </Ruler>
 
           <TrackArea ref={trackAreaRef}>
             {thumbnails.map((thumb, i) =>
-              thumb ? <ThumbImage key={i} src={thumb} alt="" $left={i * thumbWidthPx} $width={thumbWidthPx} /> : null
+              thumb ? <ThumbImage key={i} src={thumb} alt="" style={{ left: i * thumbWidthPx, width: thumbWidthPx }} /> : null
             )}
 
-            <DimOverlay $left={0} $width={timeToX(trim.start)} />
-            <DimOverlay $left={timeToX(trim.end)} $width={Math.max(0, filmstripWidth - timeToX(trim.end))} />
+            <DimOverlay style={{ left: 0, width: timeToX(trim.start) }} />
+            <DimOverlay style={{ left: timeToX(trim.end), width: Math.max(0, filmstripWidth - timeToX(trim.end)) }} />
 
-            <TrimHandle $x={timeToX(trim.start)} onMouseDown={(e) => handleTrimDrag(e, 'start')} title={formatTime(trim.start)}>
+            <TrimHandle style={{ left: timeToX(trim.start) - 3 }} onMouseDown={(e) => handleTrimDrag(e, 'start')} title={formatTime(trim.start)}>
               <TrimHandleInner />
             </TrimHandle>
-            <TrimHandle $x={timeToX(trim.end)} onMouseDown={(e) => handleTrimDrag(e, 'end')} title={formatTime(trim.end)}>
+            <TrimHandle style={{ left: timeToX(trim.end) - 3 }} onMouseDown={(e) => handleTrimDrag(e, 'end')} title={formatTime(trim.end)}>
               <TrimHandleInner />
             </TrimHandle>
 
@@ -791,7 +788,7 @@ export default function Timeline() {
               const isHidden = slice.status === 'hidden'
 
               return (
-                <SliceWrapper key={slice.id} $left={leftPx} $width={widthPx}>
+                <SliceWrapper key={slice.id} style={{ left: leftPx, width: widthPx }}>
                   <SliceBg
                     $selected={isSelected}
                     $hidden={isHidden}
@@ -863,8 +860,7 @@ export default function Timeline() {
             {tracking.untrackedRanges.map((range, i) => (
               <UntrackedOverlay
                 key={`untracked-${i}`}
-                $left={timeToX(range.start)}
-                $width={timeToX(range.end) - timeToX(range.start)}
+                style={{ left: timeToX(range.start), width: timeToX(range.end) - timeToX(range.start) }}
                 onClick={(e) => {
                   e.stopPropagation()
                   setCurrentTime(range.start)
@@ -902,14 +898,11 @@ export default function Timeline() {
               )
             })}
 
-            <Playhead $x={timeToX(currentTime)} />
+            <Playhead style={{ left: timeToX(currentTime) }} />
 
             {dragBox && (
               <SelectionBox
-                $left={dragBox.left}
-                $top={dragBox.top}
-                $width={dragBox.width}
-                $height={dragBox.height}
+                style={{ left: dragBox.left, top: dragBox.top, width: dragBox.width, height: dragBox.height }}
               />
             )}
           </TrackArea>
