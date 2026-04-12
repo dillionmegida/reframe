@@ -60,6 +60,14 @@ npm install
 - FFmpeg binaries (via `@ffmpeg-installer/ffmpeg`)
 - All required Node.js packages
 
+### 3. Set up pre-commit hook (optional but recommended)
+
+```bash
+bash setup-pre-commit.sh
+```
+
+This installs a Git hook that automatically runs tests before commits when relevant files are changed.
+
 ## Development
 
 ### Running the app in development mode
@@ -79,6 +87,17 @@ This will:
 1. Make changes to your code
 2. The app will automatically reload
 3. Test your changes in the running app
+
+### Pre-commit tests
+
+A Git pre-commit hook now runs `npm test` (Vitest) automatically **only when relevant files are staged** (app code, tests, or build tooling). Commits will be blocked if tests fail.
+
+- No tests for doc-only changes like README updates.
+- To skip temporarily (e.g., WIP or docs-only): set `SKIP_PRE_COMMIT_TESTS=1` for that commit
+
+  ```bash
+  SKIP_PRE_COMMIT_TESTS=1 git commit -m "docs: update"
+  ```
 
 ## Building for Production
 
