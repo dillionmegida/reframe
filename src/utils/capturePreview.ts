@@ -1,6 +1,7 @@
 import { interpolateAtTime } from './interpolate'
 import { computeCrop } from './computeCrop'
 import type { Keyframe } from '../types'
+import CaptureWorker from './captureWorker?worker'
 
 // Bitrate scaled to output resolution:
 // 1080x1920 -> ~8 Mbps, 1214x2160 (4K) -> ~20 Mbps
@@ -39,12 +40,6 @@ async function handleCapture(payload: any) {
       video.onerror = () => reject(new Error('Video failed to load'))
     })
 
-    const canvas = document.createElement('canvas')
-    canvas.width = outputWidth
-    canvas.height = outputHeight
-    const ctx = canvas.getContext('2d')
-    if (!ctx) throw new Error('Could not get canvas 2D context')
-
     const vidW = video.videoWidth || videoWidth
     const vidH = video.videoHeight || videoHeight
 
@@ -54,10 +49,38 @@ async function handleCapture(payload: any) {
     const frameDir: string = await (window as any).electron.createFrameDir()
     const savePromises: Promise<any>[] = []
 
+    // Spin up a worker that handles drawing + JPEG encoding off the main thread
+    const worker = new CaptureWorker()
+    worker.postMessage({ type: 'init', outputWidth, outputHeight })
+
+    // Set up a promise-based mechanism to handle worker responses
+    let resolveEncoded: ((data: ArrayBuffer) => void) | null = null
+    let rejectEncoded: ((err: Error) => void) | null = null
+
+    worker.onmessage = (e: MessageEvent) => {
+      const msg = e.data
+      if (msg.type === 'encoded' && resolveEncoded) {
+        resolveEncoded(msg.data)
+        resolveEncoded = null
+        rejectEncoded = null
+      } else if (msg.type === 'error' && rejectEncoded) {
+        rejectEncoded(new Error(msg.message))
+        resolveEncoded = null
+        rejectEncoded = null
+      }
+    }
+
+    function waitForEncoded(): Promise<ArrayBuffer> {
+      return new Promise<ArrayBuffer>((resolve, reject) => {
+        resolveEncoded = resolve
+        rejectEncoded = reject
+      })
+    }
+
     for (let i = 0; i < frameCount; i++) {
       const targetTime = start + i * frameDuration
 
-      // Seek to the exact frame time
+      // Seek to the exact frame time (must happen on main thread — DOM-bound)
       video.currentTime = targetTime
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error(`Seek timed out at frame ${i}`)), 8_000)
@@ -77,19 +100,20 @@ async function handleCapture(payload: any) {
         interp, vidW, vidH, outputWidth, outputHeight
       )
 
-      ctx.clearRect(0, 0, outputWidth, outputHeight)
-      ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, outputWidth, outputHeight)
+      // Create a transferable ImageBitmap from the video frame (lightweight on main thread)
+      const bitmap = await createImageBitmap(video)
 
-      // Export frame as JPEG and save via IPC
-      const blob = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob(
-          (b) => (b ? resolve(b) : reject(new Error('canvas.toBlob failed'))),
-          'image/jpeg',
-          0.97
-        )
-      })
+      // Send bitmap + crop params to worker for draw + JPEG encode
+      const encodedPromise = waitForEncoded()
+      worker.postMessage(
+        { type: 'frame', index: i, bitmap, cropX, cropY, cropW, cropH },
+        [bitmap]
+      )
+
+      // Wait for the worker to encode and return the JPEG buffer
+      const jpegBuffer = await encodedPromise
       const savePromise = (async () => {
-        const buf = new Uint8Array(await blob.arrayBuffer())
+        const buf = new Uint8Array(jpegBuffer)
         await (window as any).electron.saveFrame(buf, frameDir, i)
       })()
       savePromises.push(savePromise)
@@ -106,6 +130,9 @@ async function handleCapture(payload: any) {
 
     // Ensure all frame writes finished before responding
     await Promise.all(savePromises)
+
+    // Clean up the worker
+    worker.terminate()
 
     ;(window as any).electron.respondCapture(replyChannel, { frameDir, frameCount })
   } catch (err: any) {

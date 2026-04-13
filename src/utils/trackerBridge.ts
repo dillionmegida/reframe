@@ -1,5 +1,6 @@
 import type { TrackResult, UntrackedRange } from '../types'
-import { trackFrames, type BBox } from './simpleTracker'
+import type { BBox } from './simpleTracker'
+import TrackerWorker from './trackerWorker?worker'
 
 const TRACKING_WIDTH = 480 // downscale to this width for speed
 
@@ -16,75 +17,39 @@ export interface TrackerBridgeOptions {
   onError: (message: string) => void
 }
 
-async function extractFrames(
-  videoPath: string,
-  start: number,
-  end: number,
-  fps: number,
-  sourceWidth: number,
-  sourceHeight: number,
-  onProgress?: (n: number, total: number) => void
-): Promise<{ frames: ImageData[]; trackW: number; trackH: number }> {
-  // Downscale for tracking speed
-  const scale = Math.min(1, TRACKING_WIDTH / sourceWidth)
-  const trackW = Math.round(sourceWidth * scale)
-  const trackH = Math.round(sourceHeight * scale)
+/**
+ * Extract a single frame at the given seek time onto the provided canvas,
+ * then return the pixel data as a transferable ArrayBuffer.
+ * The ImageData is NOT retained — only the raw buffer is kept briefly
+ * before being transferred to the worker (zero-copy).
+ */
+async function extractAndTransferFrame(
+  video: HTMLVideoElement,
+  ctx: CanvasRenderingContext2D,
+  trackW: number,
+  trackH: number,
+  seekTime: number,
+  frameIndex: number
+): Promise<ArrayBuffer> {
+  video.currentTime = seekTime
 
-  console.log('[TrackerBridge] Extracting frames', { videoPath, start, end, fps, sourceWidth, sourceHeight, trackW, trackH })
-
-  const video = document.createElement('video')
-  video.src = `file://${videoPath}`
-  video.crossOrigin = 'anonymous'
-  video.muted = true
-  video.playsInline = true
-  video.preload = 'auto'
-
-  await new Promise((resolve, reject) => {
-    video.onloadedmetadata = () => {
-      console.log('[TrackerBridge] Video metadata loaded:', video.videoWidth, 'x', video.videoHeight, 'duration:', video.duration)
-      resolve(null)
+  await new Promise<void>((resolve) => {
+    const timeout = setTimeout(() => {
+      console.warn('[TrackerBridge] Seek timeout at frame', frameIndex, 'time', seekTime)
+      resolve()
+    }, 8_000)
+    const onSeeked = () => {
+      clearTimeout(timeout)
+      video.removeEventListener('seeked', onSeeked)
+      resolve()
     }
-    video.onerror = () => {
-      reject(new Error('Failed to load video for frame extraction'))
-    }
+    video.addEventListener('seeked', onSeeked)
   })
 
-  const canvas = document.createElement('canvas')
-  canvas.width = trackW
-  canvas.height = trackH
-  const ctx = canvas.getContext('2d')!
-
-  const frameDuration = 1 / fps
-  const frameCount = Math.max(1, Math.round((end - start) * fps))
-  const frames: ImageData[] = []
-
-  console.log('[TrackerBridge] Extracting', frameCount, 'frames at', fps, 'fps')
-
-  for (let i = 0; i < frameCount; i++) {
-    const seekTime = start + i * frameDuration
-    video.currentTime = seekTime
-
-    await new Promise<void>((resolve) => {
-      const timeout = setTimeout(() => {
-        console.warn('[TrackerBridge] Seek timeout at frame', i, 'time', seekTime)
-        resolve()
-      }, 8_000)
-      const onSeeked = () => {
-        clearTimeout(timeout)
-        video.removeEventListener('seeked', onSeeked)
-        resolve()
-      }
-      video.addEventListener('seeked', onSeeked)
-    })
-
-    ctx.drawImage(video, 0, 0, trackW, trackH)
-    frames.push(ctx.getImageData(0, 0, trackW, trackH))
-
-    onProgress?.(i + 1, frameCount)
-  }
-
-  console.log('[TrackerBridge] Extracted', frames.length, 'frames')
-  return { frames, trackW, trackH }
+  ctx.drawImage(video, 0, 0, trackW, trackH)
+  const imageData = ctx.getImageData(0, 0, trackW, trackH)
+  // Return the underlying ArrayBuffer — will be transferred (not copied) to worker
+  return imageData.data.buffer
 }
 
 function computeUntrackedRanges(
@@ -118,9 +83,14 @@ function computeUntrackedRanges(
 
 export async function runTracker(options: TrackerBridgeOptions): Promise<() => void> {
   let cancelled = false
+  let worker: Worker | null = null
 
   const cancel = () => {
     cancelled = true
+    if (worker) {
+      worker.terminate()
+      worker = null
+    }
   }
 
   try {
@@ -134,27 +104,10 @@ export async function runTracker(options: TrackerBridgeOptions): Promise<() => v
       bbox: options.initialBbox,
     })
 
-    // Phase 1: Extract frames at downscaled resolution (0–50% progress)
-    const { frames, trackW, trackH } = await extractFrames(
-      options.videoPath,
-      options.start,
-      options.end,
-      options.fps,
-      options.frameWidth,
-      options.frameHeight,
-      (n, total) => {
-        if (cancelled) return
-        const pct = (n / total) * 50
-        options.onProgress(pct, n, totalFrames, true)
-      }
-    )
-
-    if (cancelled) return cancel
-
-    if (frames.length === 0) {
-      options.onError('No frames extracted from video')
-      return cancel
-    }
+    // Downscale for tracking speed
+    const scale = Math.min(1, TRACKING_WIDTH / options.frameWidth)
+    const trackW = Math.round(options.frameWidth * scale)
+    const trackH = Math.round(options.frameHeight * scale)
 
     // Scale the user-drawn bbox from source resolution to tracking resolution
     const scaleX = trackW / options.frameWidth
@@ -166,41 +119,125 @@ export async function runTracker(options: TrackerBridgeOptions): Promise<() => v
       h: Math.max(8, Math.round(options.initialBbox.h * scaleY)),
     }
 
-    console.log('[TrackerBridge] Phase 2: Running tracker on', frames.length, 'frames at', trackW, 'x', trackH, 'scaledBbox:', scaledBbox)
+    // Set up video element for frame extraction
+    const video = document.createElement('video')
+    video.src = `file://${options.videoPath}`
+    video.crossOrigin = 'anonymous'
+    video.muted = true
+    video.playsInline = true
+    video.preload = 'auto'
 
-    // Phase 2: Run tracker on extracted frames (50–100% progress)
-    const trackResults = await trackFrames(
-      frames,
-      scaledBbox,
-      options.start,
-      options.fps,
-      (frame, total) => {
-        if (cancelled) return
-        const pct = 50 + (frame / total) * 50
-        const confident = true
-        options.onProgress(pct, frame, total, confident)
+    await new Promise((resolve, reject) => {
+      video.onloadedmetadata = () => {
+        console.log('[TrackerBridge] Video metadata loaded:', video.videoWidth, 'x', video.videoHeight, 'duration:', video.duration)
+        resolve(null)
       }
-    )
+      video.onerror = () => {
+        reject(new Error('Failed to load video for frame extraction'))
+      }
+    })
+
+    const canvas = document.createElement('canvas')
+    canvas.width = trackW
+    canvas.height = trackH
+    const ctx = canvas.getContext('2d')!
+
+    // Spin up the tracker worker
+    const w = new TrackerWorker()
+    worker = w
+
+    const trackResults: TrackResult[] = []
+
+    // Set up a promise that resolves when the worker finishes
+    const workerDone = new Promise<void>((resolve, reject) => {
+      w.onmessage = (e: MessageEvent) => {
+        const msg = e.data
+        if (cancelled) return
+
+        switch (msg.type) {
+          case 'result': {
+            const r = msg.result
+            trackResults.push({
+              frame: r.frame,
+              t: r.t,
+              x: r.cx,
+              y: r.cy,
+              confident: r.confidence >= 0.4,
+            })
+            break
+          }
+          case 'progress': {
+            // Map combined progress: extraction is interleaved with tracking
+            // Each frame goes through extract (main) → track (worker) as one unit
+            const pct = ((msg.frame + 1) / msg.total) * 100
+            options.onProgress(pct, msg.frame, msg.total, true)
+            break
+          }
+          case 'finished':
+            resolve()
+            break
+          case 'error':
+            reject(new Error(msg.message))
+            break
+        }
+      }
+      w.onerror = (err) => {
+        reject(new Error(err.message || 'Worker error'))
+      }
+    })
+
+    // Initialize the worker with bbox and dimensions
+    w.postMessage({
+      type: 'init',
+      bbox: scaledBbox,
+      width: trackW,
+      height: trackH,
+      startTime: options.start,
+      fps: options.fps,
+      totalFrames,
+      opts: {},
+    })
+
+    console.log('[TrackerBridge] Streaming', totalFrames, 'frames to worker at', trackW, 'x', trackH, 'scaledBbox:', scaledBbox)
+
+    // Stream frames one at a time: extract on main thread, transfer to worker
+    const frameDuration = 1 / options.fps
+    for (let i = 0; i < totalFrames; i++) {
+      if (cancelled) break
+
+      const seekTime = options.start + i * frameDuration
+      const buffer = await extractAndTransferFrame(video, ctx, trackW, trackH, seekTime, i)
+
+      if (cancelled) break
+
+      // Transfer the ArrayBuffer to the worker (zero-copy)
+      w.postMessage({ type: 'frame', index: i, data: buffer }, [buffer])
+    }
+
+    if (!cancelled) {
+      // Signal that all frames have been sent
+      w.postMessage({ type: 'done' })
+      await workerDone
+    }
 
     if (cancelled) return cancel
 
     console.log('[TrackerBridge] Tracking complete:', trackResults.length, 'results')
 
-    // Convert to TrackResult format
-    const results: TrackResult[] = trackResults.map((r) => ({
-      frame: r.frame,
-      t: r.t,
-      x: r.cx,
-      y: r.cy,
-      confident: r.confidence >= 0.4,
-    }))
-
-    const untrackedRanges = computeUntrackedRanges(results)
+    const untrackedRanges = computeUntrackedRanges(trackResults)
     console.log('[TrackerBridge] Untracked ranges:', untrackedRanges.length)
 
-    options.onDone(results, untrackedRanges)
+    options.onDone(trackResults, untrackedRanges)
+
+    // Clean up the worker
+    w.terminate()
+    worker = null
   } catch (err: any) {
     console.error('[TrackerBridge] Error:', err)
+    if (worker) {
+      worker.terminate()
+      worker = null
+    }
     if (!cancelled) {
       options.onError(err?.message || 'Tracking failed')
     }
