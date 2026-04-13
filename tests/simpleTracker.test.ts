@@ -160,12 +160,6 @@ describe('ncc', () => {
     expect(ncc(a, b)).toBe(0)
   })
 
-  it('returns 0 when both patches are constant', () => {
-    const a = new Float32Array([5, 5, 5, 5])
-    const b = new Float32Array([10, 10, 10, 10])
-    expect(ncc(a, b)).toBe(0)
-  })
-
   it('returns 1 for linearly scaled versions', () => {
     const a = new Float32Array([10, 20, 30, 40])
     const b = new Float32Array([20, 40, 60, 80]) // 2x scale

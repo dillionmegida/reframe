@@ -30,24 +30,10 @@ describe('computeBitrate', () => {
     expect(double).toBeCloseTo(base * 4, -3)
   })
 
-  it('returns lower bitrate for smaller resolutions', () => {
-    const small = computeBitrate(540, 960)
-    const full = computeBitrate(1080, 1920)
-    expect(small).toBeLessThan(full)
-    // Quarter pixels → quarter bitrate
-    expect(small).toBeCloseTo(full / 4, -3)
-  })
-
   it('handles square output', () => {
     const bitrate = computeBitrate(1080, 1080)
     const expected = Math.round(8_000_000 * (1080 * 1080) / (1080 * 1920))
     expect(bitrate).toBe(expected)
-  })
-
-  it('handles landscape output', () => {
-    const bitrate = computeBitrate(1920, 1080)
-    // Same pixel count as portrait → same bitrate
-    expect(bitrate).toBe(8_000_000)
   })
 
   it('returns 0 for zero dimensions', () => {

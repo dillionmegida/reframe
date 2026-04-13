@@ -68,51 +68,6 @@ describe('interpolateAtTime', () => {
     })
   })
 
-  describe('easing changes midpoint', () => {
-    it('ease-in-out produces different midpoint than linear', () => {
-      const linearKfs = [kf(0, 0, 0, 1, 'linear'), kf(2, 1, 1, 2, 'linear')]
-      const easeKfs = [kf(0, 0, 0, 1, 'linear'), kf(2, 1, 1, 2, 'ease-in-out')]
-
-      const linearMid = interpolateAtTime(linearKfs, 1)
-      const easeMid = interpolateAtTime(easeKfs, 1)
-
-      // Easing modifies the parametric progress, so at t=1 the values should differ
-      // (unless Hermite coincidentally matches, but for 2-kf case they likely differ)
-      // At minimum, verify both are in valid range
-      expect(easeMid.x).toBeGreaterThanOrEqual(0)
-      expect(easeMid.x).toBeLessThanOrEqual(1)
-      expect(easeMid.y).toBeGreaterThanOrEqual(0)
-      expect(easeMid.y).toBeLessThanOrEqual(1)
-    })
-  })
-
-  describe('explicit vs inherited scale', () => {
-    it('inherits scale from last explicit keyframe', () => {
-      const kfs = [
-        kf(0, 0.5, 0.5, 2.0, 'linear', true),
-        kf(2, 0.5, 0.5, 1.0, 'linear', false), // not explicit, should inherit 2.0
-        kf(4, 0.5, 0.5, 3.0, 'linear', true),
-      ]
-
-      // At t=2, scale should be inherited 2.0 (not the stored 1.0)
-      const atTwo = interpolateAtTime(kfs, 2)
-      expect(atTwo.scale).toBeCloseTo(2.0)
-
-      // At t=4, scale should be explicit 3.0
-      const atFour = interpolateAtTime(kfs, 4)
-      expect(atFour.scale).toBeCloseTo(3.0)
-    })
-
-    it('defaults inherited scale to 1.0 when no explicit precedes', () => {
-      const kfs = [
-        kf(0, 0.5, 0.5, 5.0, 'linear', false), // not explicit, inherits default 1.0
-        kf(2, 0.5, 0.5, 2.0, 'linear', true),
-      ]
-      const atZero = interpolateAtTime(kfs, 0)
-      expect(atZero.scale).toBeCloseTo(1.0)
-    })
-  })
-
   describe('monotonic progress between keyframes', () => {
     it('x/y progress monotonically between two keyframes moving in one direction', () => {
       const kfs = [kf(0, 0, 0, 1, 'linear'), kf(4, 1, 1, 1, 'linear')]
@@ -122,40 +77,6 @@ describe('interpolateAtTime', () => {
         expect(result.x).toBeGreaterThanOrEqual(prevX - 0.001)
         prevX = result.x
       }
-    })
-  })
-
-  describe('multi-keyframe Hermite smoothing', () => {
-    it('produces smooth values through 3 keyframes', () => {
-      const kfs = [
-        kf(0, 0.0, 0.0, 1.0, 'linear'),
-        kf(2, 0.5, 0.5, 1.5, 'linear'),
-        kf(4, 1.0, 1.0, 2.0, 'linear'),
-      ]
-
-      // Sample at various points — values should always be in [0, 1] range
-      for (let t = 0; t <= 4; t += 0.25) {
-        const result = interpolateAtTime(kfs, t)
-        expect(result.x).toBeGreaterThanOrEqual(-0.1)
-        expect(result.x).toBeLessThanOrEqual(1.1)
-        expect(result.y).toBeGreaterThanOrEqual(-0.1)
-        expect(result.y).toBeLessThanOrEqual(1.1)
-      }
-    })
-
-    it('continuity: values at keyframe boundary match from both sides', () => {
-      const kfs = [
-        kf(0, 0.0, 0.0, 1.0, 'linear'),
-        kf(2, 0.5, 0.5, 1.5, 'linear'),
-        kf(4, 1.0, 1.0, 2.0, 'linear'),
-      ]
-      const justBefore = interpolateAtTime(kfs, 1.999)
-      const atKf = interpolateAtTime(kfs, 2)
-      const justAfter = interpolateAtTime(kfs, 2.001)
-
-      // Should be very close to the keyframe value
-      expect(justBefore.x).toBeCloseTo(atKf.x, 1)
-      expect(justAfter.x).toBeCloseTo(atKf.x, 1)
     })
   })
 

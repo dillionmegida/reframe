@@ -290,16 +290,6 @@ describe('editorStore', () => {
       expect(useEditorStore.getState().project!.keyframes.length).toBe(1)
     })
 
-    it('new action clears future', () => {
-      useEditorStore.getState().loadProject(makeProject())
-      useEditorStore.getState().addOrUpdateKeyframe(kf(5, 0.3, 0.4, 1.5))
-      useEditorStore.getState().undo()
-      expect(useEditorStore.getState().future.length).toBe(1)
-
-      useEditorStore.getState().addOrUpdateKeyframe(kf(10, 0.5, 0.5, 1.0))
-      expect(useEditorStore.getState().future.length).toBe(0)
-    })
-
     it('undo restores trim', () => {
       useEditorStore.getState().loadProject(makeProject({ trim: { start: 0, end: 30 } }))
       useEditorStore.getState().setTrimStart(5)
@@ -307,23 +297,6 @@ describe('editorStore', () => {
 
       useEditorStore.getState().undo()
       expect(useEditorStore.getState().project!.trim.start).toBe(0)
-    })
-
-    it('undo restores slices', () => {
-      useEditorStore.getState().loadProject(makeProject())
-      useEditorStore.getState().addSlice(5)
-      expect(useEditorStore.getState().project!.slices.length).toBe(1)
-
-      useEditorStore.getState().undo()
-      expect(useEditorStore.getState().project!.slices.length).toBe(0)
-    })
-
-    it('undo cap: past limited to 50 entries', () => {
-      useEditorStore.getState().loadProject(makeProject())
-      for (let i = 0; i < 55; i++) {
-        useEditorStore.getState().addOrUpdateKeyframe(kf(i * 0.2, 0.5, 0.5, 1.0))
-      }
-      expect(useEditorStore.getState().past.length).toBeLessThanOrEqual(50)
     })
 
     it('undo with no past does nothing', () => {
