@@ -2,6 +2,7 @@ import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import styled from 'styled-components'
 import { useEditorStore } from '../store/editorStore'
 import { interpolateAtTime } from '../utils/interpolate'
+import { computeCrop } from '../utils/computeCrop'
 import TrackingOverlay from './TrackingOverlay'
 import TrackingProgress from './TrackingProgress'
 
@@ -266,22 +267,19 @@ export default function SourcePanel({
   }, [isPlaying, project.trim.end, setCurrentTime, setPlaying])
 
   // Crop rectangle dimensions in rendered pixels
-  // The crop region in source-video pixels has aspect ratio = outputWidth/outputHeight.
-  // At scale=1 the crop should be as large as possible while fitting inside the source.
-  const outputAspect = project.outputWidth / project.outputHeight   // e.g. 9/16 = 0.5625
-  const videoAspect = project.videoWidth / project.videoHeight       // e.g. 16/9 = 1.778
+  const crop = computeCrop(
+    interp,
+    project.videoWidth,
+    project.videoHeight,
+    project.outputWidth,
+    project.outputHeight
+  )
 
-  // Decide whether the crop is height-limited or width-limited inside the source frame
-  let cropFractionW: number, cropFractionH: number
-  if (outputAspect < videoAspect) {
-    // Portrait output on landscape source: crop is full height, narrow width
-    cropFractionH = 1 / interp.scale
-    cropFractionW = (cropFractionH * outputAspect) / videoAspect
-  } else {
-    // Landscape or square output: crop is full width, shorter height
-    cropFractionW = 1 / interp.scale
-    cropFractionH = (cropFractionW * videoAspect) / outputAspect
-  }
+  const outputAspect = project.outputWidth / project.outputHeight
+  const videoAspect = project.videoWidth / project.videoHeight
+
+  const cropFractionW = crop.cropW / project.videoWidth
+  const cropFractionH = crop.cropH / project.videoHeight
 
   const cropRenderW = cropFractionW * videoRendered.w
   const cropRenderH = cropFractionH * videoRendered.h

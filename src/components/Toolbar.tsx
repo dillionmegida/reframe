@@ -279,7 +279,6 @@ export default function Toolbar({
   onTrackingFpsChange: (fps: TrackingFps) => void
 }) {
   const project = useEditorStore((s) => s.project!)
-  const currentTime = useEditorStore((s) => s.currentTime)
   const past = useEditorStore((s) => s.past)
   const future = useEditorStore((s) => s.future)
   const undo = useEditorStore((s) => s.undo)
@@ -303,9 +302,12 @@ export default function Toolbar({
   const exportableSlices = (project.slices || []).filter((s) => s.status === 'keep')
   const hasExportableSlices = exportableSlices.length > 0
 
-  const currentSlice = project.slices.find(
-    (s) => currentTime >= s.start && currentTime <= s.end
-  )
+  const getCurrentSlice = () => {
+    const currentTime = useEditorStore.getState().currentTime
+    return project.slices.find((s) => currentTime >= s.start && currentTime <= s.end)
+  }
+  
+  const currentSlice = getCurrentSlice()
   // Disable tracking when multiple keyframes are selected
   const canTrack = !!currentSlice && selectedKeyframeIds.length <= 1
 
@@ -394,7 +396,10 @@ export default function Toolbar({
       {!tracking.active && !tracking.drawingBox && tracking.results.length === 0 && (
         <>
           <TrackButton
-            onClick={() => currentSlice && startBoxDraw(currentSlice.id)}
+            onClick={() => {
+              const slice = getCurrentSlice()
+              if (slice) startBoxDraw(slice.id)
+            }}
             disabled={!canTrack}
             style={{ 
               WebkitAppRegion: 'no-drag',

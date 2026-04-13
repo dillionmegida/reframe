@@ -168,11 +168,13 @@ describe('editorStore – extra coverage', () => {
       expect(useEditorStore.getState().past.length).toBe(1)
     })
 
-    it('updateSlice creates undo snapshot', () => {
+    it('updateSlice creates undo snapshot', async () => {
       useEditorStore.getState().loadProject(makeProject())
       useEditorStore.getState().addSlice(5)
       const id = useEditorStore.getState().project!.slices[0].id
       useEditorStore.getState().updateSlice(id, { end: 20 })
+      // Wait for debounced undo (300ms)
+      await new Promise(resolve => setTimeout(resolve, 350))
       expect(useEditorStore.getState().past.length).toBe(2)
     })
 

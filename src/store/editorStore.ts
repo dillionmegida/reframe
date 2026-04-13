@@ -3,6 +3,9 @@ import { v4 as uuidv4 } from 'uuid'
 import type { Keyframe, VideoEntry, TrimRange, Slice, SliceStatus, TrackResult, UntrackedRange, TrackingState, EasingType } from '../types'
 import { ramerDouglasPeucker } from '../utils/rdp'
 
+let pendingSliceUndoTimer: ReturnType<typeof setTimeout> | null = null
+let pendingSliceSnapshot: { keyframes: Keyframe[], trim: TrimRange, slices: Slice[] } | null = null
+
 export type AutoEasingType = 'auto' | EasingType
 
 export interface TrackingSettings {
@@ -260,10 +263,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       k.id === id ? { ...k, ...patch } : k
     )
 
+    // Only sort if timestamp changed
+    const timestampChanged = patch.timestamp !== undefined
+    const finalKeyframes = timestampChanged ? sortKeyframes(newKeyframes) : newKeyframes
+
     set({
       project: {
         ...project,
-        keyframes: sortKeyframes(newKeyframes),
+        keyframes: finalKeyframes,
       },
       past: newPast,
       future: [],
@@ -452,16 +459,41 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const { project, past } = get()
     if (!project) return
 
-    const newPast = pushUndo(past, project.keyframes, project.trim, project.slices)
+    // Capture snapshot before first update in a continuous operation
+    if (!pendingSliceSnapshot) {
+      pendingSliceSnapshot = {
+        keyframes: deepCopyKeyframes(project.keyframes),
+        trim: { ...project.trim },
+        slices: deepCopySlices(project.slices),
+      }
+    }
+
+    // Clear existing timer
+    if (pendingSliceUndoTimer) {
+      clearTimeout(pendingSliceUndoTimer)
+    }
+
+    // Update slice immediately
     const newSlices = project.slices.map((s) =>
       s.id === id ? { ...s, ...patch } : s
     ).sort((a, b) => a.start - b.start)
 
     set({
       project: { ...project, slices: newSlices },
-      past: newPast,
       future: [],
     })
+
+    // Push undo after 300ms of inactivity
+    pendingSliceUndoTimer = setTimeout(() => {
+      if (pendingSliceSnapshot) {
+        const currentState = get()
+        const newPast = [...currentState.past, pendingSliceSnapshot]
+        if (newPast.length > 50) newPast.shift()
+        set({ past: newPast })
+        pendingSliceSnapshot = null
+      }
+      pendingSliceUndoTimer = null
+    }, 300)
   },
 
   setSliceStatus: (id, status) => {

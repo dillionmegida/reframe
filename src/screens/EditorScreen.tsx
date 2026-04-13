@@ -306,6 +306,7 @@ function EditorContent() {
 
       if (e.code === 'ArrowLeft') {
         e.preventDefault()
+        const currentTime = useEditorStore.getState().currentTime
         if (e.shiftKey) {
           setCurrentTime(currentTime - 5)
         } else {
@@ -316,6 +317,7 @@ function EditorContent() {
 
       if (e.code === 'ArrowRight') {
         e.preventDefault()
+        const currentTime = useEditorStore.getState().currentTime
         if (e.shiftKey) {
           setCurrentTime(currentTime + 5)
         } else {
@@ -325,6 +327,7 @@ function EditorContent() {
       }
 
       if (e.code === 'KeyK') {
+        const currentTime = useEditorStore.getState().currentTime
         const interp = interpolateAtTime(project.keyframes, currentTime)
         addOrUpdateKeyframe({
           timestamp: currentTime,
@@ -337,6 +340,7 @@ function EditorContent() {
       }
 
       if (e.code === 'KeyS' && !e.metaKey && !e.ctrlKey) {
+        const currentTime = useEditorStore.getState().currentTime
         addSlice(currentTime)
         return
       }
@@ -393,7 +397,6 @@ function EditorContent() {
     [
       project,
       isPlaying,
-      currentTime,
       selectedKeyframeIds,
       selectedSliceId,
       setPlaying,

@@ -1,8 +1,13 @@
 import type { Keyframe } from '../types'
 import { applyEasing } from './easing'
 
+const resolvedKeyframesCache = new WeakMap<Keyframe[], Keyframe[]>()
+
 function resolveKeyframeScales(keyframes: Keyframe[]): Keyframe[] {
   if (keyframes.length === 0) return []
+  
+  const cached = resolvedKeyframesCache.get(keyframes)
+  if (cached) return cached
   
   const resolved: Keyframe[] = []
   let inheritedScale = 1.0
@@ -18,6 +23,7 @@ function resolveKeyframeScales(keyframes: Keyframe[]): Keyframe[] {
     }
   }
   
+  resolvedKeyframesCache.set(keyframes, resolved)
   return resolved
 }
 

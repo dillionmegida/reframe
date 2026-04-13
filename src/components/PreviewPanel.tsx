@@ -2,6 +2,7 @@ import { useRef, useEffect, useState } from 'react'
 import styled from 'styled-components'
 import { useEditorStore } from '../store/editorStore'
 import { interpolateAtTime } from '../utils/interpolate'
+import { computeCrop } from '../utils/computeCrop'
 
 const Wrapper = styled.div`
   height: 100%;
@@ -53,6 +54,8 @@ const HudBadge = styled.div`
 
 export default function PreviewPanel() {
   const project = useEditorStore((s) => s.project!)
+  const currentTime = useEditorStore((s) => s.currentTime)
+  const isPlaying = useEditorStore((s) => s.isPlaying)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -62,6 +65,7 @@ export default function PreviewPanel() {
   const vfcRef = useRef<number>(0)
   const hudRef = useRef<HTMLDivElement>(null)
   const lastDrawnTimeRef = useRef<number>(-1)
+  const drawAtTimeRef = useRef<((t: number) => void) | null>(null)
 
   const outputAspect = project.outputWidth / project.outputHeight
 
@@ -150,25 +154,13 @@ export default function PreviewPanel() {
       const { videoWidth, videoHeight } = state.project
       const interp = interpolateAtTime(state.project.keyframes, t)
 
-      const vidAspect = videoWidth / videoHeight
-      const outAspect = state.project.outputWidth / state.project.outputHeight
-
-      let cropFracW: number
-      let cropFracH: number
-      if (outAspect < vidAspect) {
-        cropFracH = 1 / interp.scale
-        cropFracW = (outAspect / vidAspect) * cropFracH
-      } else {
-        cropFracW = 1 / interp.scale
-        cropFracH = (vidAspect / outAspect) * cropFracW
-      }
-      cropFracW = Math.min(1, Math.max(0.0001, cropFracW))
-      cropFracH = Math.min(1, Math.max(0.0001, cropFracH))
-
-      const cropW = cropFracW * videoWidth
-      const cropH = cropFracH * videoHeight
-      const cropX = (videoWidth - cropW) * Math.max(0, Math.min(1, interp.x))
-      const cropY = (videoHeight - cropH) * Math.max(0, Math.min(1, interp.y))
+      const { cropX, cropY, cropW, cropH } = computeCrop(
+        interp,
+        videoWidth,
+        videoHeight,
+        state.project.outputWidth,
+        state.project.outputHeight
+      )
 
       ctx.clearRect(0, 0, sz.w, sz.h)
       ctx.drawImage(source, cropX, cropY, cropW, cropH, 0, 0, sz.w, sz.h)
@@ -178,12 +170,16 @@ export default function PreviewPanel() {
       }
     }
 
+    drawAtTimeRef.current = drawAtTime
+
     const startRaf = () => {
       const tick = () => {
         if (stopped) return
         const state = useEditorStore.getState()
-        drawAtTime(state.currentTime)
-        rafRef.current = requestAnimationFrame(tick)
+        if (state.isPlaying) {
+          drawAtTime(state.currentTime)
+          rafRef.current = requestAnimationFrame(tick)
+        }
       }
       rafRef.current = requestAnimationFrame(tick)
     }
@@ -214,6 +210,13 @@ export default function PreviewPanel() {
       }
     }
   }, [project.videoPath])
+
+  // Redraw when currentTime changes while paused
+  useEffect(() => {
+    if (!isPlaying && drawAtTimeRef.current) {
+      drawAtTimeRef.current(currentTime)
+    }
+  }, [currentTime, isPlaying])
 
   return (
     <Wrapper ref={wrapperRef}>

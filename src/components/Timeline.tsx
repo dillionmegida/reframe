@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
+import { useRef, useEffect, useState, useCallback, useMemo, memo } from 'react'
 import { createPortal } from 'react-dom'
 import styled from 'styled-components'
 import { useEditorStore } from '../store/editorStore'
@@ -14,6 +14,19 @@ function formatTime(s: number): string {
   const sec = s - m * 60
   return `${String(m).padStart(2, '0')}:${sec.toFixed(1).padStart(4, '0')}`
 }
+
+// Memoized component that only re-renders when currentTime changes
+const TimelinePlayhead = memo(({ timeToX }: { timeToX: (t: number) => number }) => {
+  const currentTime = useEditorStore((s) => s.currentTime)
+  
+  return (
+    <>
+      <PlayheadLine style={{ left: timeToX(currentTime) - 1 }} />
+      <PlayheadLabel style={{ left: timeToX(currentTime) }}>{formatTime(currentTime)}</PlayheadLabel>
+      <Playhead style={{ left: timeToX(currentTime) }} />
+    </>
+  )
+})
 
 const Container = styled.div`
   height: 100%;
@@ -340,7 +353,6 @@ const SelectionBox = styled.div`
 
 export default function Timeline() {
   const project = useEditorStore((s) => s.project!)
-  const currentTime = useEditorStore((s) => s.currentTime)
   const selectedKeyframeIds = useEditorStore((s) => s.selectedKeyframeIds)
   const setCurrentTime = useEditorStore((s) => s.setCurrentTime)
   const selectKeyframe = useEditorStore((s) => s.selectKeyframe)
@@ -421,13 +433,14 @@ export default function Timeline() {
     const prevZoom = prevZoomRef.current
     if (prevZoom === zoom) return
     prevZoomRef.current = zoom
+    const currentTime = useEditorStore.getState().currentTime
     const prevFilmstripWidth = viewportWidth * prevZoom
     const playheadX = (currentTime / duration) * prevFilmstripWidth
     const viewportFraction = (playheadX - sc.scrollLeft) / sc.clientWidth
     const newPlayheadX = (currentTime / duration) * filmstripWidth
     sc.scrollLeft = newPlayheadX - viewportFraction * sc.clientWidth
     setScrollLeft(sc.scrollLeft)
-  }, [zoom, filmstripWidth, viewportWidth, currentTime, duration])
+  }, [zoom, filmstripWidth, viewportWidth, duration])
 
   useEffect(() => {
     const sc = scrollContainerRef.current
@@ -439,24 +452,39 @@ export default function Timeline() {
   }, [])
 
   const lastAutoScrollTimeRef = useRef(0)
+  // Subscribe to isPlaying to trigger auto-scroll check during playback
+  const isPlaying = useEditorStore((s) => s.isPlaying)
+  
   useEffect(() => {
+    if (!isPlaying) return
+    
     const sc = scrollContainerRef.current
     if (!sc || filmstripWidth <= 0) return
     
-    // Only auto-scroll if currentTime changed significantly (> 0.5s)
-    // to avoid excessive re-renders during playback
-    const timeDiff = Math.abs(currentTime - lastAutoScrollTimeRef.current)
-    if (timeDiff < 0.5) return
-    
-    lastAutoScrollTimeRef.current = currentTime
-    const playheadX = (currentTime / duration) * filmstripWidth
-    const sl = sc.scrollLeft
-    const sr = sl + sc.clientWidth
-    if (playheadX < sl + 40 || playheadX > sr - 40) {
-      sc.scrollLeft = playheadX - sc.clientWidth / 2
-      setScrollLeft(sc.scrollLeft)
+    let rafId: number
+    const checkScroll = () => {
+      const currentTime = useEditorStore.getState().currentTime
+      const timeDiff = Math.abs(currentTime - lastAutoScrollTimeRef.current)
+      
+      if (timeDiff >= 0.5) {
+        lastAutoScrollTimeRef.current = currentTime
+        const playheadX = (currentTime / duration) * filmstripWidth
+        const sl = sc.scrollLeft
+        const sr = sl + sc.clientWidth
+        if (playheadX < sl + 40 || playheadX > sr - 40) {
+          sc.scrollLeft = playheadX - sc.clientWidth / 2
+          setScrollLeft(sc.scrollLeft)
+        }
+      }
+      
+      if (useEditorStore.getState().isPlaying) {
+        rafId = requestAnimationFrame(checkScroll)
+      }
     }
-  }, [currentTime, filmstripWidth, duration])
+    
+    rafId = requestAnimationFrame(checkScroll)
+    return () => cancelAnimationFrame(rafId)
+  }, [isPlaying, filmstripWidth, duration])
 
   const timeToX = useCallback((t: number) => (filmstripWidth > 0 ? (t / duration) * filmstripWidth : 0), [filmstripWidth, duration])
   const xToTime = useCallback((x: number) => (filmstripWidth > 0 ? (x / filmstripWidth) * duration : 0), [filmstripWidth, duration])
@@ -911,8 +939,6 @@ export default function Timeline() {
 
       <ScrollArea ref={scrollContainerRef} onMouseDown={handleScrollAreaMouseDown}>
         <Filmstrip ref={filmstripRef} style={{ width: filmstripWidth }}>
-          <PlayheadLine style={{ left: timeToX(currentTime) - 1 }} />
-
           <Ruler>
             {ticks.map((t) => (
               <Tick key={t} style={{ left: timeToX(t) }}>
@@ -920,8 +946,9 @@ export default function Timeline() {
                 <TickLabel>{formatTime(t)}</TickLabel>
               </Tick>
             ))}
-            <PlayheadLabel style={{ left: timeToX(currentTime) }}>{formatTime(currentTime)}</PlayheadLabel>
           </Ruler>
+          
+          <TimelinePlayhead timeToX={timeToX} />
 
           <TrackArea ref={trackAreaRef}>
             <FilmstripCanvas ref={filmstripCanvasRef} style={{ left: visibleThumbRegionLeft, width: visibleThumbRegionWidth }} />
@@ -1026,6 +1053,7 @@ export default function Timeline() {
             ))}
 
             {project.keyframes.map((kf) => {
+              const currentTime = useEditorStore.getState().currentTime
               const isActive = Math.abs(currentTime - kf.timestamp) < 0.1
               const isSelected = selectedKeyframeIds.includes(kf.id) || draggingOverIds.includes(kf.id)
               const size = isActive ? 12 : 10
@@ -1052,8 +1080,6 @@ export default function Timeline() {
                 </KeyframeDot>
               )
             })}
-
-            <Playhead style={{ left: timeToX(currentTime) }} />
 
             {dragBox && (
               <SelectionBox

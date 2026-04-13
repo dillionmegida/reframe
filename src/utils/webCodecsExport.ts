@@ -1,5 +1,6 @@
 import type { Keyframe } from '../types'
 import { interpolateAtTime } from './interpolate'
+import { computeCrop } from './computeCrop'
 
 interface ExportSegment {
   start: number
@@ -75,25 +76,13 @@ export async function exportSegmentWithWebCodecs(
 
     // Get interpolated crop values
     const interp = interpolateAtTime(segment.keyframes, absTime)
-    const vidAspect = segment.sourceWidth / segment.sourceHeight
-    const outAspect = segment.outputWidth / segment.outputHeight
-
-    let cropFracW: number, cropFracH: number
-    if (outAspect < vidAspect) {
-      cropFracH = 1 / Math.max(interp.scale, 0.0001)
-      cropFracW = (outAspect / vidAspect) * cropFracH
-    } else {
-      cropFracW = 1 / Math.max(interp.scale, 0.0001)
-      cropFracH = (vidAspect / outAspect) * cropFracW
-    }
-
-    cropFracW = Math.min(1, Math.max(0.0001, cropFracW))
-    cropFracH = Math.min(1, Math.max(0.0001, cropFracH))
-
-    const cropW = cropFracW * segment.sourceWidth
-    const cropH = cropFracH * segment.sourceHeight
-    const cropX = (segment.sourceWidth - cropW) * Math.max(0, Math.min(1, interp.x))
-    const cropY = (segment.sourceHeight - cropH) * Math.max(0, Math.min(1, interp.y))
+    const { cropX, cropY, cropW, cropH } = computeCrop(
+      interp,
+      segment.sourceWidth,
+      segment.sourceHeight,
+      segment.outputWidth,
+      segment.outputHeight
+    )
 
     // Draw cropped frame to canvas
     ctx.drawImage(
