@@ -62,6 +62,14 @@ npm install
 
 ### 3. Set up pre-commit hook (optional but recommended)
 
+Use the one-step helper (installs deps if missing, then installs the hook):
+
+```bash
+npm run precommit-setup
+```
+
+Or run the shell script directly if you already installed dependencies:
+
 ```bash
 bash setup-pre-commit.sh
 ```

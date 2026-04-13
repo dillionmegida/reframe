@@ -8,6 +8,7 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "package": "electron-builder",
+    "precommit-setup": "node scripts/precommit-setup.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "npm run build && HEADLESS_E2E=1 playwright test",
