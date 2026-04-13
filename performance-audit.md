@@ -6,6 +6,8 @@ Comprehensive analysis of performance issues, blocking operations, and optimizat
 
 ## 🔴 Critical: Synchronous FS Operations Blocking Electron Main Thread
 
+> Status: ✅ Resolved — all synchronous FS operations in `electron/main.ts` and `electron/export.ts` were converted to async `fs.promises` equivalents, with IPC handlers updated accordingly to avoid main-thread blocking.
+
 ### 1. `electron/main.ts` — Synchronous file I/O in IPC handlers
 
 **Location:** `@/Users/dillion/Desktop/github/reframe/electron/main.ts:41-58`

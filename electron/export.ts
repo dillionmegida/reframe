@@ -25,7 +25,7 @@ interface ExportJob {
 
 const activeJobs = new Map<string, ExportJob>()
 
-export function cancelExport(jobId: string): boolean {
+export async function cancelExport(jobId: string): Promise<boolean> {
   const job = activeJobs.get(jobId)
   if (!job) return false
 
@@ -44,9 +44,8 @@ export function cancelExport(jobId: string): boolean {
   // Cleanup temp files
   for (const dir of job.tempDirs) {
     try {
-      if (fs.existsSync(dir)) {
-        fs.rmSync(dir, { recursive: true, force: true })
-      }
+      await fs.promises.access(dir)
+      await fs.promises.rm(dir, { recursive: true, force: true })
     } catch {
       // ignore cleanup errors
     }
@@ -56,10 +55,10 @@ export function cancelExport(jobId: string): boolean {
   return true
 }
 
-export function cancelExportBySliceId(sliceId: string): boolean {
+export async function cancelExportBySliceId(sliceId: string): Promise<boolean> {
   for (const [jobId, job] of activeJobs) {
     if (job.sliceId === sliceId) {
-      return cancelExport(jobId)
+      return await cancelExport(jobId)
     }
   }
   return false
@@ -435,10 +434,11 @@ async function runPipeline(
       exportJob.ffmpegCommand = command
 
       const muxPromise = promise
-        .then(() => {
+        .then(async () => {
           // Cleanup frame dir after successful mux
           try {
-            if (fs.existsSync(frameDir)) fs.rmSync(frameDir, { recursive: true, force: true })
+            await fs.promises.access(frameDir)
+            await fs.promises.rm(frameDir, { recursive: true, force: true })
           } catch { /* ignore */ }
           if (abortSignal.aborted) return
           exportJob.state = 'done'
@@ -450,10 +450,11 @@ async function runPipeline(
             path: outputPath,
           })
         })
-        .catch((err: Error) => {
+        .catch(async (err: Error) => {
           // Cleanup frame dir on error
           try {
-            if (fs.existsSync(frameDir)) fs.rmSync(frameDir, { recursive: true, force: true })
+            await fs.promises.access(frameDir)
+            await fs.promises.rm(frameDir, { recursive: true, force: true })
           } catch { /* ignore */ }
           if (abortSignal.aborted) {
             exportJob.state = 'cancelled'
@@ -493,9 +494,8 @@ async function runPipeline(
         })
         // Clean up temp dir on cancellation
         try {
-          if (fs.existsSync(tempDir)) {
-            fs.rmSync(tempDir, { recursive: true, force: true })
-          }
+          await fs.promises.access(tempDir)
+          await fs.promises.rm(tempDir, { recursive: true, force: true })
         } catch {
           // ignore cleanup errors
         }
@@ -578,7 +578,7 @@ export async function exportVideo(
         status: 'keep',
       }
       const tempDir = path.join(os.tmpdir(), `reframe-export-${randomUUID()}`)
-      fs.mkdirSync(tempDir, { recursive: true })
+      await fs.promises.mkdir(tempDir, { recursive: true })
 
       const job = createJob(slice, 0, tempDir)
 
@@ -592,11 +592,13 @@ export async function exportVideo(
     }
 
     // Multi-slice: build all jobs first, then run the pipeline
-    const jobs: SliceJob[] = exportSlices.map((slice, i) => {
-      const tempDir = path.join(os.tmpdir(), `reframe-export-${randomUUID()}`)
-      fs.mkdirSync(tempDir, { recursive: true })
-      return createJob(slice, i, tempDir)
-    })
+    const jobs: SliceJob[] = await Promise.all(
+      exportSlices.map(async (slice, i) => {
+        const tempDir = path.join(os.tmpdir(), `reframe-export-${randomUUID()}`)
+        await fs.promises.mkdir(tempDir, { recursive: true })
+        return createJob(slice, i, tempDir)
+      })
+    )
 
     await runPipeline(jobs, project, mainWindow, fps)
 

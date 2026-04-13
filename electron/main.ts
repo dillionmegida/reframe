@@ -31,30 +31,39 @@ function getFfmpegPath(): string {
 }
 
 // Centralized data store in ~/.reframe/data.json
-function getDataPath(): string {
-  const os = require('os')
+let dataDirInitialized = false
+
+async function getDataPath(): Promise<string> {
   const dir = path.join(os.homedir(), '.reframe')
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+  if (!dataDirInitialized) {
+    try {
+      await fs.promises.access(dir)
+    } catch {
+      await fs.promises.mkdir(dir, { recursive: true })
+    }
+    dataDirInitialized = true
+  }
   return path.join(dir, 'data.json')
 }
 
-function loadAppData(): any {
-  const p = getDataPath()
-  if (fs.existsSync(p)) {
-    try {
-      const data = JSON.parse(fs.readFileSync(p, 'utf-8'))
-      // Ensure basePath exists for legacy data
-      if (!data.hasOwnProperty('basePath')) {
-        data.basePath = null
-      }
-      return data
-    } catch { /* corrupt */ }
+async function loadAppData(): Promise<any> {
+  const p = await getDataPath()
+  try {
+    await fs.promises.access(p)
+    const data = JSON.parse(await fs.promises.readFile(p, 'utf-8'))
+    // Ensure basePath exists for legacy data
+    if (!data.hasOwnProperty('basePath')) {
+      data.basePath = null
+    }
+    return data
+  } catch {
+    return { basePath: null, projects: [], videos: [] }
   }
-  return { basePath: null, projects: [], videos: [] }
 }
 
-function saveAppData(data: any): void {
-  fs.writeFileSync(getDataPath(), JSON.stringify(data, null, 2), 'utf-8')
+async function saveAppData(data: any): Promise<void> {
+  const p = await getDataPath()
+  await fs.promises.writeFile(p, JSON.stringify(data, null, 2), 'utf-8')
 }
 
 function createWindow() {
@@ -105,11 +114,11 @@ app.on('activate', () => {
 // ── IPC: App Data ──────────────────────────────────────────
 
 ipcMain.handle('load-app-data', async () => {
-  return loadAppData()
+  return await loadAppData()
 })
 
 ipcMain.handle('save-app-data', async (_event, data: any) => {
-  saveAppData(data)
+  await saveAppData(data)
 })
 
 // ── IPC: File operations ───────────────────────────────────
@@ -204,7 +213,7 @@ ipcMain.handle('export-video', async (_event, args) => {
     
     if (isQuickExport) {
       // Quick export: only remove matching timestamp files
-      fs.mkdirSync(exportsDir, { recursive: true })
+      await fs.promises.mkdir(exportsDir, { recursive: true })
       
       const slice = slices[0]
       const startTime = formatTimeForFilename(slice.start)
@@ -212,21 +221,27 @@ ipcMain.handle('export-video', async (_event, args) => {
       const timestampPattern = `${startTime}-to-${endTime}`
       
       // Find and remove existing files with matching timestamps
-      if (fs.existsSync(exportsDir)) {
-        const files = fs.readdirSync(exportsDir)
+      try {
+        await fs.promises.access(exportsDir)
+        const files = await fs.promises.readdir(exportsDir)
         for (const file of files) {
           if (file.includes(timestampPattern)) {
             const filePath = path.join(exportsDir, file)
-            fs.unlinkSync(filePath)
+            await fs.promises.unlink(filePath)
           }
         }
+      } catch {
+        // Directory doesn't exist yet
       }
     } else {
       // Full export: clear entire exports directory
-      if (fs.existsSync(exportsDir)) {
-        fs.rmSync(exportsDir, { recursive: true, force: true })
+      try {
+        await fs.promises.access(exportsDir)
+        await fs.promises.rm(exportsDir, { recursive: true, force: true })
+      } catch {
+        // Directory doesn't exist
       }
-      fs.mkdirSync(exportsDir, { recursive: true })
+      await fs.promises.mkdir(exportsDir, { recursive: true })
     }
     
     // Generate filename with timestamps
@@ -241,10 +256,10 @@ ipcMain.handle('export-video', async (_event, args) => {
 
 ipcMain.handle('cancel-export', async (_event, { jobId, sliceId }: { jobId?: string; sliceId?: string }) => {
   if (jobId) {
-    return cancelExport(jobId)
+    return await cancelExport(jobId)
   }
   if (sliceId) {
-    return cancelExportBySliceId(sliceId)
+    return await cancelExportBySliceId(sliceId)
   }
   return false
 })
@@ -263,18 +278,24 @@ ipcMain.handle('select-directory', async () => {
 })
 
 ipcMain.handle('ensure-directory', async (_event, dirPath: string) => {
-  if (!fs.existsSync(dirPath)) {
-    fs.mkdirSync(dirPath, { recursive: true })
+  try {
+    await fs.promises.access(dirPath)
+  } catch {
+    await fs.promises.mkdir(dirPath, { recursive: true })
   }
 })
 
 ipcMain.handle('rename-file', async (_event, { oldPath, newPath }: { oldPath: string; newPath: string }) => {
   try {
     // Check if destination already exists
-    if (fs.existsSync(newPath)) {
+    try {
+      await fs.promises.access(newPath)
       throw new Error('A file with that name already exists')
+    } catch (err: any) {
+      if (err.message === 'A file with that name already exists') throw err
+      // File doesn't exist, proceed with rename
     }
-    fs.renameSync(oldPath, newPath)
+    await fs.promises.rename(oldPath, newPath)
     return { success: true, newPath }
   } catch (err: any) {
     throw new Error(err.message || 'Failed to rename file')
@@ -282,23 +303,26 @@ ipcMain.handle('rename-file', async (_event, { oldPath, newPath }: { oldPath: st
 })
 
 ipcMain.handle('remove-directory', async (_event, dirPath: string) => {
-  if (fs.existsSync(dirPath)) {
-    fs.rmSync(dirPath, { recursive: true, force: true })
+  try {
+    await fs.promises.access(dirPath)
+    await fs.promises.rm(dirPath, { recursive: true, force: true })
+  } catch {
+    // Directory doesn't exist or already removed
   }
 })
 
 // Save blob data to a temp file (renderer can't write to disk)
 ipcMain.handle('save-temp-blob', async (_event, data: Uint8Array, ext: string) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'reframe-cap-'))
+  const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'reframe-cap-'))
   const filePath = path.join(dir, `${randomUUID()}.${ext.replace(/^\./, '')}`)
-  fs.writeFileSync(filePath, Buffer.from(data))
+  await fs.promises.writeFile(filePath, Buffer.from(data))
   return filePath
 })
 
 // Frame-by-frame capture: create a temp directory to hold JPEG frames
 ipcMain.handle('create-frame-dir', async () => {
   const dir = path.join(os.tmpdir(), `reframe-frames-${randomUUID()}`)
-  fs.mkdirSync(dir, { recursive: true })
+  await fs.promises.mkdir(dir, { recursive: true })
   return dir
 })
 
