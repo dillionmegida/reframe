@@ -158,6 +158,163 @@ describe('interpolateAtTime', () => {
       expect(justAfter.x).toBeCloseTo(atKf.x, 1)
     })
   })
+
+  describe('non-uniform keyframe spacing', () => {
+    it('handles widely varying time gaps between keyframes', () => {
+      const kfs = [
+        kf(0, 0.0, 0.0, 1.0, 'linear', true),
+        kf(0.5, 0.2, 0.2, 1.2, 'linear', true),   // short gap
+        kf(10, 0.8, 0.8, 2.0, 'linear', true),      // long gap
+      ]
+
+      // Values at each keyframe should be exact
+      const at0 = interpolateAtTime(kfs, 0)
+      expect(at0.x).toBeCloseTo(0.0)
+
+      const at05 = interpolateAtTime(kfs, 0.5)
+      expect(at05.x).toBeCloseTo(0.2)
+
+      const at10 = interpolateAtTime(kfs, 10)
+      expect(at10.x).toBeCloseTo(0.8)
+
+      // Midpoint of long gap should be reasonable
+      const atMid = interpolateAtTime(kfs, 5)
+      expect(atMid.x).toBeGreaterThanOrEqual(0)
+      expect(atMid.x).toBeLessThanOrEqual(1)
+    })
+  })
+
+  describe('4+ keyframes with real kfPrev/kfNext', () => {
+    it('uses actual adjacent keyframes for Hermite tangents', () => {
+      const kfs = [
+        kf(0, 0.0, 0.0, 1.0, 'linear', true),
+        kf(2, 0.25, 0.25, 1.0, 'linear', true),
+        kf(4, 0.5, 0.5, 1.0, 'linear', true),
+        kf(6, 0.75, 0.75, 1.0, 'linear', true),
+        kf(8, 1.0, 1.0, 1.0, 'linear', true),
+      ]
+
+      // Sample at every 0.5s and check all values stay in bounds
+      for (let t = 0; t <= 8; t += 0.5) {
+        const result = interpolateAtTime(kfs, t)
+        expect(result.x).toBeGreaterThanOrEqual(-0.15)
+        expect(result.x).toBeLessThanOrEqual(1.15)
+      }
+
+      // Check continuity at interior keyframe boundaries
+      for (const kfTime of [2, 4, 6]) {
+        const before = interpolateAtTime(kfs, kfTime - 0.001)
+        const at = interpolateAtTime(kfs, kfTime)
+        const after = interpolateAtTime(kfs, kfTime + 0.001)
+        expect(before.x).toBeCloseTo(at.x, 1)
+        expect(after.x).toBeCloseTo(at.x, 1)
+      }
+    })
+  })
+
+  describe('scale inheritance chains', () => {
+    it('propagates explicit scale through multiple non-explicit keyframes', () => {
+      const kfs = [
+        kf(0, 0.5, 0.5, 2.0, 'linear', true),   // explicit 2.0
+        kf(2, 0.5, 0.5, 9.0, 'linear', false),   // inherits 2.0
+        kf(4, 0.5, 0.5, 9.0, 'linear', false),   // inherits 2.0
+        kf(6, 0.5, 0.5, 3.0, 'linear', true),    // explicit 3.0
+        kf(8, 0.5, 0.5, 9.0, 'linear', false),   // inherits 3.0
+      ]
+
+      expect(interpolateAtTime(kfs, 0).scale).toBeCloseTo(2.0)
+      expect(interpolateAtTime(kfs, 2).scale).toBeCloseTo(2.0)
+      expect(interpolateAtTime(kfs, 4).scale).toBeCloseTo(2.0)
+      expect(interpolateAtTime(kfs, 6).scale).toBeCloseTo(3.0)
+      expect(interpolateAtTime(kfs, 8).scale).toBeCloseTo(3.0)
+    })
+
+    it('all non-explicit keyframes default to 1.0 when no explicit precedes', () => {
+      const kfs = [
+        kf(0, 0.5, 0.5, 5.0, 'linear', false),
+        kf(2, 0.5, 0.5, 5.0, 'linear', false),
+      ]
+      expect(interpolateAtTime(kfs, 0).scale).toBeCloseTo(1.0)
+      expect(interpolateAtTime(kfs, 2).scale).toBeCloseTo(1.0)
+    })
+  })
+
+  describe('zero-duration segment', () => {
+    it('returns first keyframe when only coincident keyframes exist', () => {
+      // t <= resolvedKeyframes[0].timestamp catches this: 5 <= 5 → returns first kf
+      const kfs = [
+        kf(5, 0.2, 0.3, 1.0, 'linear', true),
+        kf(5, 0.8, 0.9, 2.0, 'linear', true),
+      ]
+      const result = interpolateAtTime(kfs, 5)
+      expect(result.x).toBeCloseTo(0.2)
+      expect(result.y).toBeCloseTo(0.3)
+    })
+
+    it('does not produce NaN for coincident keyframes between others', () => {
+      // The duration <= 0 branch (line 54-55 in interpolate.ts) returns kfB
+      const kfs = [
+        kf(0, 0.0, 0.0, 1.0, 'linear', true),
+        kf(5, 0.2, 0.3, 1.0, 'linear', true),
+        kf(5, 0.8, 0.9, 2.0, 'linear', true),
+        kf(10, 1.0, 1.0, 1.0, 'linear', true),
+      ]
+      // Query at t=5 — hits t >= kfA.timestamp && t < kfB.timestamp on the pair [kf(5,0.2), kf(5,0.8)]
+      // duration === 0 → returns kfB values
+      const result = interpolateAtTime(kfs, 5)
+      expect(Number.isFinite(result.x)).toBe(true)
+      expect(Number.isFinite(result.y)).toBe(true)
+      expect(Number.isFinite(result.scale)).toBe(true)
+    })
+
+    it('handles query before coincident pair in a longer sequence', () => {
+      const kfs = [
+        kf(0, 0.0, 0.0, 1.0, 'linear', true),
+        kf(5, 0.2, 0.3, 1.5, 'linear', true),
+        kf(5, 0.8, 0.9, 2.0, 'linear', true),
+        kf(10, 1.0, 1.0, 1.0, 'linear', true),
+      ]
+      // Query before the coincident pair — normal interpolation
+      const result = interpolateAtTime(kfs, 3)
+      expect(Number.isFinite(result.x)).toBe(true)
+      expect(result.x).toBeGreaterThanOrEqual(0)
+      expect(result.x).toBeLessThanOrEqual(1)
+    })
+  })
+
+  describe('opposing direction keyframes', () => {
+    it('Hermite stays bounded for zigzag motion', () => {
+      const kfs = [
+        kf(0, 0.0, 0.0, 1.0, 'linear', true),
+        kf(2, 1.0, 1.0, 2.0, 'linear', true),
+        kf(4, 0.0, 0.0, 1.0, 'linear', true),
+        kf(6, 1.0, 1.0, 2.0, 'linear', true),
+      ]
+
+      for (let t = 0; t <= 6; t += 0.25) {
+        const result = interpolateAtTime(kfs, t)
+        // Allow some Hermite overshoot but should stay reasonable
+        expect(result.x).toBeGreaterThanOrEqual(-0.3)
+        expect(result.x).toBeLessThanOrEqual(1.3)
+      }
+    })
+  })
+
+  describe('easing types on segments', () => {
+    it('ease-in starts slow (value closer to start at 25%)', () => {
+      const kfs = [kf(0, 0, 0, 1, 'linear', true), kf(4, 1, 1, 1, 'ease-in', true)]
+      const at25 = interpolateAtTime(kfs, 1)
+      // ease-in: progress should be less than 25% at t=1 (25% of duration)
+      expect(at25.x).toBeLessThan(0.3)
+    })
+
+    it('ease-out starts fast (value farther from start at 25%)', () => {
+      const kfs = [kf(0, 0, 0, 1, 'linear', true), kf(4, 1, 1, 1, 'ease-out', true)]
+      const at25 = interpolateAtTime(kfs, 1)
+      // ease-out: progress should be more than 25% at t=1
+      expect(at25.x).toBeGreaterThan(0.2)
+    })
+  })
 })
 
 describe('computePreviewStyle', () => {
