@@ -24,7 +24,7 @@ export interface FrameTrackResult {
 }
 
 /** Extract greyscale channel from RGBA ImageData into a Float32Array */
-function toGrey(img: ImageData): Float32Array {
+export function toGrey(img: ImageData): Float32Array {
   const len = img.width * img.height
   const grey = new Float32Array(len)
   const d = img.data
@@ -36,7 +36,7 @@ function toGrey(img: ImageData): Float32Array {
 }
 
 /** Get a rectangular patch from a greyscale buffer */
-function getPatch(grey: Float32Array, imgW: number, x: number, y: number, w: number, h: number): Float32Array {
+export function getPatch(grey: Float32Array, imgW: number, x: number, y: number, w: number, h: number): Float32Array {
   const patch = new Float32Array(w * h)
   for (let row = 0; row < h; row++) {
     for (let col = 0; col < w; col++) {
@@ -47,7 +47,7 @@ function getPatch(grey: Float32Array, imgW: number, x: number, y: number, w: num
 }
 
 /** Compute normalised cross-correlation between two equal-sized patches */
-function ncc(a: Float32Array, b: Float32Array): number {
+export function ncc(a: Float32Array, b: Float32Array): number {
   const n = a.length
   let sumA = 0, sumB = 0
   for (let i = 0; i < n; i++) { sumA += a[i]; sumB += b[i] }
