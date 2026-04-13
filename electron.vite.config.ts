@@ -9,7 +9,12 @@ export default defineConfig({
         input: {
           index: resolve(__dirname, 'electron/main.ts'),
         },
-        external: ['better-sqlite3', 'fluent-ffmpeg', 'ffmpeg-static'],
+        external: [
+          '@ffmpeg-installer/ffmpeg',
+          'ffprobe-static',
+          'better-sqlite3',
+          'fluent-ffmpeg',
+        ],
       },
     },
   },

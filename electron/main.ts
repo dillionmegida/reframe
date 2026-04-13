@@ -5,6 +5,11 @@ import { execFile } from 'child_process'
 import { exportVideo, cancelExport, cancelExportBySliceId } from './export'
 import { randomUUID } from 'crypto'
 import os from 'os'
+// @ts-ignore
+import ffprobe from 'ffprobe-static'
+// @ts-ignore
+import ffmpegInstaller from '@ffmpeg-installer/ffmpeg'
+import { formatTimeForFilename } from './formatTime'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -21,12 +26,10 @@ function parseFps(rate: string | undefined): number {
 }
 
 function getFFprobePath(): string {
-  const ffprobe = require('ffprobe-static')
   return ffprobe.path
 }
 
 function getFfmpegPath(): string {
-  const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg')
   return ffmpegInstaller.path
 }
 
@@ -68,17 +71,20 @@ async function saveAppData(data: any): Promise<void> {
 
 function createWindow() {
   const isHeadless = process.env.HEADLESS_E2E === '1'
-  const { width: screenW, height: screenH } = screen.getPrimaryDisplay().workAreaSize
+
+  // Don't check screen size in headless — it can hang
+  const winWidth = isHeadless ? 1280 : screen.getPrimaryDisplay().workAreaSize.width
+  const winHeight = isHeadless ? 800 : screen.getPrimaryDisplay().workAreaSize.height
 
   mainWindow = new BrowserWindow({
-    width: screenW,
-    height: screenH,
+    width: winWidth,
+    height: winHeight,
     minWidth: 1024,
     minHeight: 700,
     backgroundColor: '#0e0e0e',
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 16, y: 16 },
-    show: !isHeadless,
+    show: true, // 👈 always show — Xvfb provides the display in CI
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -87,15 +93,8 @@ function createWindow() {
     },
   })
 
-  if (isHeadless) {
-    mainWindow.once('ready-to-show', () => {
-      if (mainWindow) mainWindow.hide()
-    })
-  }
-
   if (process.env.NODE_ENV === 'development' || process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL || 'http://localhost:8000')
-    // mainWindow.webContents.openDevTools();
   } else {
     mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
   }
@@ -104,6 +103,8 @@ function createWindow() {
 app.whenReady().then(createWindow)
 
 app.on('window-all-closed', () => {
+  // In test mode, let Playwright control the lifecycle
+  if (process.env.NODE_ENV === 'test') return
   if (process.platform !== 'darwin') app.quit()
 })
 
@@ -170,16 +171,6 @@ ipcMain.handle('get-video-metadata', async (_event, filePath: string) => {
   })
 })
 
-// Helper to format time for filenames (e.g., 50.5s -> "50s" or 125.3s -> "2m5s")
-function formatTimeForFilename(seconds: number): string {
-  const roundedSeconds = Math.round(seconds)
-  if (roundedSeconds < 60) {
-    return `${roundedSeconds}s`
-  }
-  const mins = Math.floor(roundedSeconds / 60)
-  const secs = roundedSeconds % 60
-  return secs > 0 ? `${mins}m${secs}s` : `${mins}m`
-}
 
 ipcMain.handle('export-video', async (_event, args) => {
   if (!mainWindow) return null
@@ -188,8 +179,7 @@ ipcMain.handle('export-video', async (_event, args) => {
   
   // If no basePath, fall back to old behavior (ask user)
   if (!basePath) {
-    const sliceCount = slices?.length || 0
-    const defaultName = sliceCount > 1 ? 'reframe-export.mp4' : 'reframe-export.mp4'
+    const defaultName = 'reframe-export.mp4'
     const result = await dialog.showSaveDialog(mainWindow, {
       defaultPath: defaultName,
       filters: [{ name: 'MP4 Video', extensions: ['mp4'] }],

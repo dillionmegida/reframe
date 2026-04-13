@@ -1,5 +1,17 @@
-import { _electron as electron, ElectronApplication, Page } from '@playwright/test';
+import { _electron as electron, ElectronApplication, Page, test } from '@playwright/test';
 import path from 'path';
+
+let activeApp: ElectronApplication | null = null;
+
+test.afterEach(async () => {
+  if (activeApp) {
+    await Promise.race([
+      activeApp.close(),
+      new Promise(resolve => setTimeout(resolve, 5000)),
+    ]).catch(() => {});
+    activeApp = null;
+  }
+});
 
 export interface AppSeedData {
   basePath?: string | null;
@@ -7,11 +19,6 @@ export interface AppSeedData {
   videos?: Array<Record<string, any>>;
 }
 
-/**
- * A mock video entry that can be used to seed the editor.
- * Uses a non-existent path — the <video> element will fail to load,
- * but all Zustand store / UI logic still works.
- */
 export const MOCK_PROJECT = {
   id: 'test-project-1',
   name: 'Test Project',
@@ -44,40 +51,49 @@ export const MOCK_VIDEO = {
   addedAt: Date.now(),
 };
 
+async function seedIpcHandlers(app: ElectronApplication, seed: AppSeedData) {
+  await app.evaluate(async ({ ipcMain }, seedData) => {
+    ipcMain.removeHandler('load-app-data');
+    ipcMain.handle('load-app-data', async () => seedData);
+
+    ipcMain.removeHandler('save-app-data');
+    ipcMain.handle('save-app-data', async () => {});
+
+    ipcMain.removeHandler('ensure-directory');
+    ipcMain.handle('ensure-directory', async () => {});
+
+    ipcMain.removeHandler('remove-directory');
+    ipcMain.handle('remove-directory', async () => {});
+
+    ipcMain.removeHandler('export-video');
+    ipcMain.handle('export-video', async () => '/tmp/reframe-test/export.mp4');
+  }, seed);
+}
+
 export async function launchElectronApp(
   seed?: AppSeedData,
 ): Promise<{ app: ElectronApplication; page: Page }> {
+  const isCI = !!process.env.CI;
+  const args = [
+    path.join(__dirname, '../../out/main/index.js'),
+    '--no-sandbox',
+    '--disable-gpu',
+    '--disable-dev-shm-usage',
+  ];
+
   const app = await electron.launch({
-    args: [path.join(__dirname, '../../out/main/index.js')],
+    args,
     env: {
       ...process.env,
       NODE_ENV: 'test',
-      HEADLESS_E2E: process.env.HEADLESS_E2E || '0',
+      HEADLESS_E2E: isCI ? '1' : '0',
     },
   });
 
-  // If seed data provided, override the IPC handler *before* the renderer calls it
+  activeApp = app;
+
   if (seed) {
-    await app.evaluate(async ({ ipcMain }, seedData) => {
-      // Remove existing handler and replace with our mock
-      ipcMain.removeHandler('load-app-data');
-      ipcMain.handle('load-app-data', async () => seedData);
-
-      // No-op save so tests don't write to disk
-      ipcMain.removeHandler('save-app-data');
-      ipcMain.handle('save-app-data', async () => {});
-
-      // No-op directory operations
-      ipcMain.removeHandler('ensure-directory');
-      ipcMain.handle('ensure-directory', async () => {});
-
-      ipcMain.removeHandler('remove-directory');
-      ipcMain.handle('remove-directory', async () => {});
-
-      // Mock export to instantly succeed
-      ipcMain.removeHandler('export-video');
-      ipcMain.handle('export-video', async () => '/tmp/reframe-test/export.mp4');
-    }, seed);
+    await seedIpcHandlers(app, seed);
   }
 
   const page = await app.firstWindow();
@@ -86,10 +102,6 @@ export async function launchElectronApp(
   return { app, page };
 }
 
-/**
- * Launch directly into the editor with a seeded project and video.
- * Sets localStorage route so the app navigates straight to the editor screen.
- */
 export async function launchIntoEditor(): Promise<{ app: ElectronApplication; page: Page }> {
   const seed: AppSeedData = {
     basePath: '/tmp/reframe-test',
@@ -99,10 +111,8 @@ export async function launchIntoEditor(): Promise<{ app: ElectronApplication; pa
 
   const { app, page } = await launchElectronApp(seed);
 
-  // Clear all localStorage to avoid stale playhead positions from previous tests
   await page.evaluate(() => localStorage.clear());
 
-  // Set the stored route so the app loads into the editor view
   await page.evaluate((ids) => {
     localStorage.setItem(
       'reframe.route',
@@ -110,12 +120,14 @@ export async function launchIntoEditor(): Promise<{ app: ElectronApplication; pa
     );
   }, { projectId: MOCK_PROJECT.id, videoId: MOCK_VIDEO.id });
 
-  // Reload so the app reads the seeded route + data
+  // Re-seed before reload — the reload triggers a fresh load-app-data IPC call
+  await seedIpcHandlers(app, seed);
+
   await page.reload();
   await page.waitForLoadState('domcontentloaded');
 
-  // Wait for the timeline to appear — that means the editor is fully mounted
-  await page.waitForSelector('[data-testid="timeline"]', { timeout: 10000 });
+  const timelineTimeout = process.env.CI ? 30000 : 10000;
+  await page.waitForSelector('[data-testid="timeline"]', { timeout: timelineTimeout });
 
   return { app, page };
 }
@@ -124,16 +136,11 @@ export async function closeElectronApp(app: ElectronApplication): Promise<void> 
   await app.close();
 }
 
-/**
- * Read Zustand editorStore state from the renderer.
- * Requires the store bridge exposed in main.tsx (NODE_ENV=test).
- */
 export async function getEditorState(page: Page): Promise<any> {
   return page.evaluate(() => {
     const store = (window as any).__editorStore;
     if (!store) return null;
     const state = store.getState();
-    // Return a serializable subset
     return {
       currentTime: state.currentTime,
       isPlaying: state.isPlaying,
@@ -161,9 +168,6 @@ export async function getEditorState(page: Page): Promise<any> {
   });
 }
 
-/**
- * Read Zustand appStore state from the renderer.
- */
 export async function getAppState(page: Page): Promise<any> {
   return page.evaluate(() => {
     const store = (window as any).__appStore;
