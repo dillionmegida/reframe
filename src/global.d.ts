@@ -12,8 +12,8 @@ interface ElectronAPI {
   renameFile: (oldPath: string, newPath: string) => Promise<{ success: boolean; newPath: string }>
   exportVideo: (args: any) => Promise<string | null>
   cancelExport: (jobId: string, sliceId?: string) => Promise<boolean>
-  onExportProgress: (cb: (payload: any) => void) => void
-  onExportDone: (cb: (payload: any) => void) => void
+  onExportProgress: (cb: (payload: any) => void) => () => void
+  onExportDone: (cb: (payload: any) => void) => () => void
   showInFolder: (path: string) => void
   selectDirectory: () => Promise<string | null>
   ensureDirectory: (path: string) => Promise<void>

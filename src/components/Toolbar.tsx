@@ -6,12 +6,7 @@ import { useAppStore } from '../store/appStore'
 import { useExport } from '../contexts/ExportContext'
 import type { AspectRatio, TrackingFps } from '../types'
 import TrackingSettingsModal from './TrackingSettingsModal'
-
-function formatTime(s: number): string {
-  const m = Math.floor(s / 60)
-  const sec = s - m * 60
-  return `${String(m).padStart(2, '0')}:${sec.toFixed(1).padStart(4, '0')}`
-}
+import { formatTime } from '../utils/formatTime'
 
 type OutputRatio = '9:16' | '4:5' | '1:1' | '16:9'
 

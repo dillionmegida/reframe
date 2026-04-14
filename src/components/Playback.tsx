@@ -1,11 +1,6 @@
 import { useEditorStore } from '../store/editorStore'
 import styled from 'styled-components'
-
-function formatTime(s: number): string {
-  const m = Math.floor(s / 60)
-  const sec = s - m * 60
-  return `${String(m).padStart(2, '0')}:${sec.toFixed(1).padStart(4, '0')}`
-}
+import { formatTime } from '../utils/formatTime'
 
 const Bar = styled.div`
   height: 100%;

@@ -24,10 +24,14 @@ contextBridge.exposeInMainWorld('electron', {
   createFrameDir: () => ipcRenderer.invoke('create-frame-dir'),
   saveFrame: (data: Uint8Array, dir: string, index: number) => ipcRenderer.invoke('save-frame', data, dir, index),
   onExportProgress: (cb: (payload: any) => void) => {
-    ipcRenderer.on('export:progress', (_: any, payload: any) => cb(payload))
+    const listener = (_: any, payload: any) => cb(payload)
+    ipcRenderer.on('export:progress', listener)
+    return () => ipcRenderer.removeListener('export:progress', listener)
   },
   onExportDone: (cb: (payload: any) => void) => {
-    ipcRenderer.on('export:done', (_: any, payload: any) => cb(payload))
+    const listener = (_: any, payload: any) => cb(payload)
+    ipcRenderer.on('export:done', listener)
+    return () => ipcRenderer.removeListener('export:done', listener)
   },
   showInFolder: (path: string) => ipcRenderer.invoke('show-in-folder', path),
 

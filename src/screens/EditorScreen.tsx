@@ -10,6 +10,7 @@ import Toolbar from '../components/Toolbar'
 import type { TrackingFps } from '../types'
 import { interpolateAtTime } from '../utils/interpolate'
 import { runTracker as runTrackerBridge } from '../utils/trackerBridge'
+import { formatTimeForDisplay } from '../utils/formatTime'
 
 const Container = styled.div`
   width: 100%;
@@ -467,39 +468,18 @@ function EditorContent() {
                 const isError = state?.state === 'error'
                 const timeRemaining = state?.estimatedTimeRemaining
 
-                // Format time for display
-                const formatTime = (seconds: number) => {
-                  const roundedSeconds = Math.round(seconds)
-                  if (roundedSeconds < 60) {
-                    return `${roundedSeconds}s`
-                  }
-                  const mins = Math.floor(roundedSeconds / 60)
-                  const secs = roundedSeconds % 60
-                  return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`
-                }
-
-                const formatSliceTime = (seconds: number) => {
-                  const roundedSeconds = Math.round(seconds)
-                  if (roundedSeconds < 60) {
-                    return `${roundedSeconds}s`
-                  }
-                  const mins = Math.floor(roundedSeconds / 60)
-                  const secs = roundedSeconds % 60
-                  return secs > 0 ? `${mins}m${secs}s` : `${mins}m`
-                }
-
                 return (
                   <SliceCard key={slice.id}>
                     <SliceHeader>
                       <SliceInfo>
                         <SliceTitle>Slice {idx + 1}</SliceTitle>
                         <SliceTimestamp>
-                          {formatSliceTime(slice.start)} → {formatSliceTime(slice.end)}
+                          {formatTimeForDisplay(slice.start)} → {formatTimeForDisplay(slice.end)}
                         </SliceTimestamp>
                       </SliceInfo>
                       <SliceStatus>
                         {!isDone && !isError && timeRemaining !== undefined && timeRemaining > 0 && (
-                          <TimeRemaining>{formatTime(timeRemaining)} left</TimeRemaining>
+                          <TimeRemaining>{formatTimeForDisplay(timeRemaining)} left</TimeRemaining>
                         )}
                         <StatusText $state={state?.state || 'progress'}>
                           {isDone ? 'Done' : isError ? 'Failed' : `${pct}%`}

@@ -8,12 +8,7 @@ import type { SliceStatus } from '../types'
 import Playback from './Playback'
 import KeyframeInspector from './KeyframeInspector'
 import MultiKeyframeInspector from './MultiKeyframeInspector'
-
-function formatTime(s: number): string {
-  const m = Math.floor(s / 60)
-  const sec = s - m * 60
-  return `${String(m).padStart(2, '0')}:${sec.toFixed(1).padStart(4, '0')}`
-}
+import { formatTime } from '../utils/formatTime'
 
 // Memoized component that only re-renders when currentTime changes
 const TimelinePlayhead = memo(({ timeToX }: { timeToX: (t: number) => number }) => {

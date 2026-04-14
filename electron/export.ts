@@ -6,6 +6,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 import { randomUUID } from 'crypto'
+import { formatTimeForFilename } from './formatTime'
 
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path
 ffmpeg.setFfmpegPath(ffmpegPath)
@@ -68,16 +69,6 @@ export async function cancelExportBySliceId(sliceId: string): Promise<boolean> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-// Helper to format time for filenames (e.g., 50.5s -> "50s" or 125.3s -> "2m5s")
-function formatTimeForFilename(seconds: number): string {
-  const roundedSeconds = Math.round(seconds)
-  if (roundedSeconds < 60) {
-    return `${roundedSeconds}s`
-  }
-  const mins = Math.floor(roundedSeconds / 60)
-  const secs = roundedSeconds % 60
-  return secs > 0 ? `${mins}m${secs}s` : `${mins}m`
-}
 
 function buildSliceKeyframes(
   allKeyframes: Keyframe[],
@@ -553,10 +544,7 @@ export async function exportVideo(
     const endTime = formatTimeForFilename(slice.end)
     const timestampLabel = `${startTime}-to-${endTime}`
     
-    const outputPath =
-      total === 1
-        ? `${baseName}_${timestampLabel}_${resLabel}${ext}`
-        : `${baseName}_${timestampLabel}_${resLabel}${ext}`
+    const outputPath = `${baseName}_${timestampLabel}_${resLabel}${ext}`
 
     return {
       slice,

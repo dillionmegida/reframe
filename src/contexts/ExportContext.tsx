@@ -35,6 +35,7 @@ export function ExportProvider({ children }: { children: ReactNode }) {
   const [exportingSlices, setExportingSlices] = useState<any[]>([])
   const [isExporting, setIsExporting] = useState(false)
   const jobIdRef = useRef<string>('')
+  const cleanupFnsRef = useRef<(() => void)[]>([])
 
   const cancelExport = () => {
     setIsExporting(false)
@@ -71,7 +72,11 @@ export function ExportProvider({ children }: { children: ReactNode }) {
       )
     )
 
-    window.electron.onExportProgress((payload: any) => {
+    // Clean up any previous listeners
+    cleanupFnsRef.current.forEach(fn => fn())
+    cleanupFnsRef.current = []
+
+    const cleanupProgress = window.electron.onExportProgress((payload: any) => {
       if (!payload || typeof payload !== 'object') return
       const { sliceId, progress, state, path, error } = payload as {
         sliceId?: string
@@ -108,8 +113,9 @@ export function ExportProvider({ children }: { children: ReactNode }) {
         }
       })
     })
+    cleanupFnsRef.current.push(cleanupProgress)
 
-    window.electron.onExportDone((payload: any) => {
+    const cleanupDone = window.electron.onExportDone((payload: any) => {
       setExportComplete(true)
 
       const results: { sliceId: string; path: string }[] = Array.isArray(payload?.results)
@@ -129,6 +135,7 @@ export function ExportProvider({ children }: { children: ReactNode }) {
         return next
       })
     })
+    cleanupFnsRef.current.push(cleanupDone)
 
     try {
       await window.electron.exportVideo({
